@@ -17,7 +17,7 @@ interface Rollout {
 }
 
 export function Dashboard() {
-  const { user, signOut } = useAuth()
+  const { user } = useAuth()
   const navigate = useNavigate()
   const [label, setLabel] = useState<Label | null>(null)
   const [loading, setLoading] = useState(true)
