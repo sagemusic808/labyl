@@ -77,8 +77,7 @@ export function Login() {
         </form>
 
         <p style={styles.footerText}>
-          Don't have an account?{' '}
-          <Link to="/app/signup" style={styles.link}>Create one</Link>
+          <Link to="/" style={styles.link}>← Back to labyl.co</Link>
         </p>
       </div>
     </div>

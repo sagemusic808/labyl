@@ -3,7 +3,6 @@ import { AuthProvider } from './contexts/AuthContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
-import { Signup } from './pages/Signup'
 import { Onboarding } from './pages/Onboarding'
 import { Dashboard } from './pages/Dashboard'
 import { RolloutNew } from './pages/RolloutNew'
@@ -18,7 +17,7 @@ export default function App() {
           {/* Public */}
           <Route path="/" element={<Landing />} />
           <Route path="/app/login" element={<Login />} />
-          <Route path="/app/signup" element={<Signup />} />
+          <Route path="/app/signup" element={<Navigate to="/" replace />} />
 
           {/* App — protected */}
           <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
