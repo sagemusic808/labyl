@@ -30,7 +30,7 @@ export function Login() {
       .eq('user_id', data.user.id)
       .single()
 
-    navigate(label ? '/dashboard' : '/onboarding')
+    navigate(label ? '/app/dashboard' : '/app/onboarding')
   }
 
   return (
@@ -78,7 +78,7 @@ export function Login() {
 
         <p style={styles.footerText}>
           Don't have an account?{' '}
-          <Link to="/signup" style={styles.link}>Create one</Link>
+          <Link to="/app/signup" style={styles.link}>Create one</Link>
         </p>
       </div>
     </div>

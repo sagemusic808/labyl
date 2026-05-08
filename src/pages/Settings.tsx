@@ -99,7 +99,7 @@ export function Settings() {
 
   async function handleSignOut() {
     await signOut()
-    navigate('/login')
+    navigate('/app/login')
   }
 
   const displayLogo = logoPreview ?? label?.logo_url
@@ -118,7 +118,7 @@ export function Settings() {
     <div style={styles.root}>
       {/* Header */}
       <header style={styles.header}>
-        <button onClick={() => navigate('/dashboard')} style={styles.backBtn}>
+        <button onClick={() => navigate('/app/dashboard')} style={styles.backBtn}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 6 }}>
             <polyline points="15 18 9 12 15 6" />
           </svg>

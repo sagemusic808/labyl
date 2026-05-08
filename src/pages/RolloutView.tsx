@@ -243,7 +243,7 @@ export function RolloutView() {
     return (
       <div style={styles.loadingPage}>
         <p style={{ color: '#555', fontSize: 14 }}>Rollout not found.</p>
-        <button onClick={() => navigate('/dashboard')} style={{ ...styles.backBtn, marginTop: 16 }}>← Back to HQ</button>
+        <button onClick={() => navigate('/app/dashboard')} style={{ ...styles.backBtn, marginTop: 16 }}>← Back to HQ</button>
       </div>
     )
   }
@@ -251,7 +251,7 @@ export function RolloutView() {
   return (
     <div style={styles.root}>
       <header style={styles.topBar}>
-        <button onClick={() => isEditing ? cancelEdit() : navigate('/dashboard')} style={styles.backBtn}>
+        <button onClick={() => isEditing ? cancelEdit() : navigate('/app/dashboard')} style={styles.backBtn}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 6 }}>
             <polyline points="15 18 9 12 15 6" />
           </svg>

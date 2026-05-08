@@ -148,7 +148,7 @@ export function Onboarding() {
 
       // Fade to black then navigate
       setFadingOut(true)
-      setTimeout(() => navigate('/dashboard'), 800)
+      setTimeout(() => navigate('/app/dashboard'), 800)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
       setSaving(false)

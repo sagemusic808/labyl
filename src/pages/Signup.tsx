@@ -26,7 +26,7 @@ export function Signup() {
 
     // If a session exists immediately, email confirmation is disabled — go straight to onboarding
     if (data.session) {
-      navigate('/onboarding')
+      navigate('/app/onboarding')
     } else {
       // Email confirmation required — show a message instead
       setConfirmSent(true)
@@ -44,7 +44,7 @@ export function Signup() {
             We sent a confirmation link to <strong style={{ color: '#fff' }}>{email}</strong>.
             Click it to activate your account, then sign in.
           </p>
-          <Link to="/login" style={{ ...styles.btnPrimary, display: 'block', textAlign: 'center', textDecoration: 'none', marginTop: '24px' }}>
+          <Link to="/app/login" style={{ ...styles.btnPrimary, display: 'block', textAlign: 'center', textDecoration: 'none', marginTop: '24px' }}>
             Go to Sign In
           </Link>
         </div>
@@ -98,7 +98,7 @@ export function Signup() {
 
         <p style={styles.footerText}>
           Already have an account?{' '}
-          <Link to="/login" style={styles.link}>Sign in</Link>
+          <Link to="/app/login" style={styles.link}>Sign in</Link>
         </p>
       </div>
     </div>

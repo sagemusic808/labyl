@@ -67,7 +67,7 @@ export function Dashboard() {
         </div>
 
         <div style={styles.navRight}>
-          <button onClick={() => navigate('/rollout/new')} style={styles.newReleaseBtn}>
+          <button onClick={() => navigate('/app/rollout/new')} style={styles.newReleaseBtn}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 6 }}>
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
@@ -79,7 +79,7 @@ export function Dashboard() {
               <path d="M13.73 21a2 2 0 0 1-3.46 0" />
             </svg>
           </button>
-          <button onClick={() => navigate('/settings')} style={styles.avatarBtn} aria-label="Profile">
+          <button onClick={() => navigate('/app/settings')} style={styles.avatarBtn} aria-label="Profile">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
               <circle cx="12" cy="7" r="4" />
@@ -127,7 +127,7 @@ export function Dashboard() {
           <div style={styles.sectionHeader}>
             <h2 style={styles.sectionTitle}>Active Rollouts</h2>
             {rollouts.length > 0 && (
-              <button onClick={() => navigate('/rollout/new')} style={styles.newRolloutLink}>+ New</button>
+              <button onClick={() => navigate('/app/rollout/new')} style={styles.newRolloutLink}>+ New</button>
             )}
           </div>
           {rollouts.length === 0 ? (
@@ -135,7 +135,7 @@ export function Dashboard() {
               <RolloutsIcon />
               <p style={styles.emptyTitle}>No active rollouts</p>
               <p style={styles.emptySub}>Build a week-by-week plan with your Marketing AI</p>
-              <button style={styles.accentBtn} onClick={() => navigate('/rollout/new')}>
+              <button style={styles.accentBtn} onClick={() => navigate('/app/rollout/new')}>
                 Start Rollout
               </button>
             </div>
@@ -268,7 +268,7 @@ function RolloutRow({ rollout, onDelete }: { rollout: Rollout; onDelete: () => v
 
   return (
     <div
-      onClick={() => navigate(`/rollout/${rollout.id}`)}
+      onClick={() => navigate(`/app/rollout/${rollout.id}`)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{ ...styles.rolloutRow, borderColor: hovered ? '#333' : '#1e1e1e', cursor: 'pointer' }}
@@ -310,7 +310,7 @@ function RolloutRow({ rollout, onDelete }: { rollout: Rollout; onDelete: () => v
           {menuOpen && (
             <div style={styles.dropdown}>
               <button
-                onClick={() => { navigate(`/rollout/${rollout.id}`); setMenuOpen(false) }}
+                onClick={() => { navigate(`/app/rollout/${rollout.id}`); setMenuOpen(false) }}
                 style={styles.dropdownItem}
               >
                 View Plan

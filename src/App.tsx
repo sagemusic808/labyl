@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
 import { Signup } from './pages/Signup'
 import { Onboarding } from './pages/Onboarding'
@@ -14,10 +15,15 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
+          {/* Public */}
+          <Route path="/" element={<Landing />} />
+          <Route path="/app/login" element={<Login />} />
+          <Route path="/app/signup" element={<Signup />} />
+
+          {/* App — protected */}
+          <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
           <Route
-            path="/onboarding"
+            path="/app/onboarding"
             element={
               <ProtectedRoute>
                 <Onboarding />
@@ -25,7 +31,7 @@ export default function App() {
             }
           />
           <Route
-            path="/dashboard"
+            path="/app/dashboard"
             element={
               <ProtectedRoute>
                 <Dashboard />
@@ -33,7 +39,7 @@ export default function App() {
             }
           />
           <Route
-            path="/rollout/new"
+            path="/app/rollout/new"
             element={
               <ProtectedRoute>
                 <RolloutNew />
@@ -41,7 +47,7 @@ export default function App() {
             }
           />
           <Route
-            path="/rollout/:id"
+            path="/app/rollout/:id"
             element={
               <ProtectedRoute>
                 <RolloutView />
@@ -49,14 +55,16 @@ export default function App() {
             }
           />
           <Route
-            path="/settings"
+            path="/app/settings"
             element={
               <ProtectedRoute>
                 <Settings />
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
