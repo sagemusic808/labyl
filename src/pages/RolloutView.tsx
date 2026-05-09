@@ -31,6 +31,7 @@ interface Rollout {
   release_type: string | null
   drop_date: string | null
   artwork_url: string | null
+  release_id: string | null
   goals: string[]
   platforms: string[]
   plan: RolloutPlan
@@ -251,11 +252,11 @@ export function RolloutView() {
   return (
     <div style={styles.root}>
       <header style={styles.topBar}>
-        <button onClick={() => isEditing ? cancelEdit() : navigate('/app/dashboard')} style={styles.backBtn}>
+        <button onClick={() => isEditing ? cancelEdit() : navigate(rollout?.release_id ? `/app/releases/${rollout.release_id}` : '/app/dashboard')} style={styles.backBtn}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 6 }}>
             <polyline points="15 18 9 12 15 6" />
           </svg>
-          {isEditing ? 'Cancel' : 'HQ'}
+          {isEditing ? 'Cancel' : rollout?.release_id ? 'Release' : 'HQ'}
         </button>
         <span style={styles.topBarLabel}>{isEditing ? 'Editing Plan' : 'Rollout Plan'}</span>
         {isEditing ? (

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { ChatDrawer } from '../components/ChatDrawer'
@@ -56,6 +56,9 @@ const PLATFORM_OPTIONS = ['Spotify', 'Apple Music', 'TikTok', 'Instagram', 'YouT
 export function RolloutNew() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const releaseId = searchParams.get('releaseId')
+
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState('')
@@ -67,9 +70,9 @@ export function RolloutNew() {
   const [chatOpen, setChatOpen] = useState(false)
 
   const [data, setData] = useState<RolloutData>({
-    releaseTitle: '',
-    releaseType: '',
-    dropDate: '',
+    releaseTitle: searchParams.get('title') ?? '',
+    releaseType: searchParams.get('type') ?? '',
+    dropDate: searchParams.get('date') ?? '',
     artworkFile: null,
     artworkPreview: null,
     audioFile: null,
@@ -155,13 +158,14 @@ export function RolloutNew() {
       goals: data.goals,
       platforms: data.platforms,
       plan,
+      ...(releaseId ? { release_id: releaseId } : {}),
     })
 
     setSaving(false)
     if (error) {
       setSaveError(error.message)
     } else {
-      navigate('/app/dashboard')
+      navigate(releaseId ? `/app/releases/${releaseId}` : '/app/dashboard')
     }
   }
 
@@ -178,11 +182,11 @@ export function RolloutNew() {
     <div style={styles.root}>
       {/* Top bar */}
       <header style={styles.topBar}>
-        <button onClick={() => navigate('/app/dashboard')} style={styles.backBtn}>
+        <button onClick={() => navigate(releaseId ? `/app/releases/${releaseId}` : '/app/dashboard')} style={styles.backBtn}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 6 }}>
             <polyline points="15 18 9 12 15 6" />
           </svg>
-          HQ
+          {releaseId ? 'Release' : 'HQ'}
         </button>
         <div style={styles.stepIndicator}>
           {[1, 2, 3].map(n => (

@@ -13,6 +13,8 @@ interface Rollout {
   release_type: string | null
   drop_date: string | null
   artwork_url: string | null
+  release_id: string | null
+  releases: { artwork_url: string | null }[] | null
   created_at: string
 }
 
@@ -29,7 +31,7 @@ export function Dashboard() {
     if (!user) return
     Promise.all([
       supabase.from('labels').select('*').eq('user_id', user.id).single(),
-      supabase.from('rollouts').select('id,release_title,release_type,drop_date,artwork_url,created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
+      supabase.from('rollouts').select('id,release_title,release_type,drop_date,artwork_url,release_id,releases(artwork_url),created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
     ]).then(([labelRes, rolloutsRes]) => {
       setLabel(labelRes.data)
       setRollouts((rolloutsRes.data as Rollout[]) ?? [])
@@ -65,6 +67,11 @@ export function Dashboard() {
           <NavLogo label={label} />
           <span style={styles.navLabelName}>{label?.name ?? 'Your Label'}</span>
         </div>
+
+        <nav style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button onClick={() => navigate('/app/dashboard')} style={{ background: 'transparent', border: 'none', color: '#FFFFFF', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: '6px 12px', borderRadius: 7 }}>HQ</button>
+          <button onClick={() => navigate('/app/releases')} style={{ background: 'transparent', border: 'none', color: '#555555', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '6px 12px', borderRadius: 7 }}>Catalog</button>
+        </nav>
 
         <div style={styles.navRight}>
           <button onClick={() => navigate('/app/rollout/new')} style={styles.newReleaseBtn}>
@@ -159,6 +166,7 @@ export function Dashboard() {
               icon={<UploadIcon />}
               title="Upload a Release"
               sub="Add to your catalog"
+              onClick={() => navigate('/app/releases')}
             />
             <QuickActionCard
               icon={<ContractIcon />}
@@ -274,8 +282,8 @@ function RolloutRow({ rollout, onDelete }: { rollout: Rollout; onDelete: () => v
       style={{ ...styles.rolloutRow, borderColor: hovered ? '#333' : '#1e1e1e', cursor: 'pointer' }}
     >
       <div style={styles.rolloutLeft}>
-        {rollout.artwork_url ? (
-          <img src={rollout.artwork_url} alt="" style={styles.rolloutArt} />
+        {(rollout.releases?.[0]?.artwork_url ?? rollout.artwork_url) ? (
+          <img src={rollout.releases?.[0]?.artwork_url ?? rollout.artwork_url ?? ''} alt="" style={styles.rolloutArt} />
         ) : (
           <div style={styles.rolloutArtPlaceholder}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5">
