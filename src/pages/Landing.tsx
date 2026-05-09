@@ -35,7 +35,7 @@ function WaitlistForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} style={formStyles.form}>
+    <form onSubmit={handleSubmit} style={formStyles.form} className="l-waitlist-form">
       <input
         type="email"
         value={email}
@@ -97,6 +97,33 @@ export function Landing() {
           50% { transform: translate(30px, 60px) scale(1.05); }
         }
         * { box-sizing: border-box; }
+
+        @media (max-width: 768px) {
+          .l-nav { padding: 18px 20px !important; }
+          .l-headline { font-size: 36px !important; letter-spacing: -1px !important; }
+          .l-section { padding: 60px 20px !important; }
+          .l-pitch { padding: 60px 20px !important; }
+          .l-footer { padding: 24px 20px !important; }
+          .l-section-headline { font-size: 24px !important; }
+          .l-team-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .l-team-card { padding: 24px !important; }
+          .l-steps-row {
+            grid-template-columns: 1fr !important;
+          }
+          .l-waitlist-form {
+            flex-direction: column !important;
+            max-width: 100% !important;
+          }
+          .l-waitlist-form input {
+            width: 100% !important;
+          }
+          .l-waitlist-form button {
+            width: 100% !important;
+            text-align: center !important;
+          }
+        }
       `}</style>
 
       {/* Background orbs */}
@@ -105,7 +132,7 @@ export function Landing() {
       <div style={styles.orbPurple2} />
 
       {/* Nav */}
-      <nav style={styles.nav}>
+      <nav style={styles.nav} className="l-nav">
         <span style={styles.navLogo}>LABYL</span>
         <Link to="/app/login" style={styles.navLink}>Sign in →</Link>
       </nav>
@@ -113,7 +140,7 @@ export function Landing() {
       {/* SECTION 1 — HERO */}
       <section style={styles.hero}>
         <p style={styles.heroBadge}>Independent music, professional power</p>
-        <h1 style={styles.headline}>You are the label.</h1>
+        <h1 style={styles.headline} className="l-headline">You are the label.</h1>
         <p style={styles.subtext}>
           Labyl gives independent artists a full AI-powered label team — marketing, legal, distribution, A&R, sync, and analytics. No label deal needed. Ever.
         </p>
@@ -124,15 +151,15 @@ export function Landing() {
       </section>
 
       {/* SECTION 2 — THE TEAM */}
-      <section style={styles.section}>
+      <section style={styles.section} className="l-section">
         <div style={styles.sectionInner}>
-          <h2 style={styles.sectionHeadline}>Your AI team. Ready on day one.</h2>
+          <h2 style={styles.sectionHeadline} className="l-section-headline">Your AI team. Ready on day one.</h2>
           <p style={styles.sectionSubtext}>
             Six specialists who know your sound, your goals, and your career.
           </p>
-          <div style={styles.teamGrid}>
+          <div style={styles.teamGrid} className="l-team-grid">
             {AGENTS.map(agent => (
-              <div key={agent.type} style={styles.teamCard}>
+              <div key={agent.type} style={styles.teamCard} className="l-team-card">
                 <div style={styles.teamCardTop}>
                   <span style={{ ...styles.teamDot, background: agent.color }} />
                   <div>
@@ -148,10 +175,10 @@ export function Landing() {
       </section>
 
       {/* SECTION 3 — HOW IT WORKS */}
-      <section style={styles.section}>
+      <section style={styles.section} className="l-section">
         <div style={styles.sectionInner}>
-          <h2 style={styles.sectionHeadline}>How Labyl works</h2>
-          <div style={styles.stepsRow}>
+          <h2 style={styles.sectionHeadline} className="l-section-headline">How Labyl works</h2>
+          <div style={styles.stepsRow} className="l-steps-row">
             {STEPS.map(step => (
               <div key={step.num} style={styles.stepCard}>
                 <span style={styles.stepIcon}>{step.icon}</span>
@@ -165,7 +192,7 @@ export function Landing() {
       </section>
 
       {/* SECTION 4 — THE PITCH */}
-      <section style={styles.pitchSection}>
+      <section style={styles.pitchSection} className="l-pitch">
         <div style={styles.pitchInner}>
           <h2 style={styles.pitchHeadline}>Independent doesn't mean alone.</h2>
           <p style={styles.pitchSubtext}>
@@ -176,7 +203,7 @@ export function Landing() {
       </section>
 
       {/* FOOTER */}
-      <footer style={styles.footer}>
+      <footer style={styles.footer} className="l-footer">
         <span>© 2025 Labyl</span>
         <span>Built for independent artists.</span>
       </footer>
