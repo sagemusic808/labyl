@@ -810,7 +810,7 @@ const mitem: React.CSSProperties = { display: 'block', width: '100%', textAlign:
 
 /* ── Audio Player (Web Audio API — gapless) ── */
 
-interface AudioPlayerHandle { toggle: () => void }
+interface AudioPlayerHandle { toggle: () => void; warmup: () => void }
 
 const AudioPlayer = forwardRef<AudioPlayerHandle, {
   tracks: ProjectTrack[]
@@ -1031,8 +1031,16 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
     }
   }
 
-  // Expose toggle to parent via ref
-  useImperativeHandle(ref, () => ({ toggle: togglePlay })) // eslint-disable-line
+  // Expose toggle + warmup to parent via ref.
+  // warmup() must be called synchronously inside a click/touch handler so iOS Safari
+  // considers it a user gesture and allows AudioContext.resume() to work.
+  useImperativeHandle(ref, () => ({
+    toggle: togglePlay,
+    warmup: () => {
+      const ac = ensureAc()
+      if (ac.state === 'suspended') ac.resume().catch(() => {})
+    }
+  })) // eslint-disable-line
 
   function prev() {
     if (activeIdx === null) return
@@ -1425,6 +1433,9 @@ export function ProjectDetail() {
 
   function handleSetIdx(idx: number | null) { setActiveIdx(idx) }
   function handlePlayTrack(idx: number) {
+    // warmup() must run synchronously here (inside the click handler) so iOS Safari
+    // treats AudioContext.resume() as a user gesture and actually starts audio.
+    playerRef.current?.warmup()
     if (activeIdx === idx) playerRef.current?.toggle()
     else setActiveIdx(idx)
   }
