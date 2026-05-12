@@ -77,44 +77,75 @@ async function getAudioDuration(file: File): Promise<number> {
   })
 }
 
-// Compress large audio files (>45 MB) by resampling to 22050 Hz mono WAV.
-// Uses OfflineAudioContext so it's much faster than real-time.
+// Convert large audio files to a 16-bit WAV that fits under 48 MB.
+// Keeps stereo + 44100 Hz whenever possible — only reduces sample rate
+// or drops to mono when strictly necessary to hit the size target.
 const COMPRESS_THRESHOLD = 45 * 1024 * 1024 // 45 MB
+const TARGET_BYTES       = 48 * 1024 * 1024 // 48 MB target (under 50 MB Supabase limit)
 
 async function maybeCompressAudio(file: File, onStatus: (msg: string) => void): Promise<File> {
   if (file.size <= COMPRESS_THRESHOLD) return file
-  onStatus('Compressing audio…')
+  onStatus('Converting audio…')
+
   const arrayBuffer = await file.arrayBuffer()
-  const decodeCtx = new AudioContext()
-  const decoded = await decodeCtx.decodeAudioData(arrayBuffer)
+  const decodeCtx   = new AudioContext()
+  const decoded     = await decodeCtx.decodeAudioData(arrayBuffer)
   await decodeCtx.close()
 
-  const targetRate = 22050
-  const offCtx = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetRate), targetRate)
-  const src = offCtx.createBufferSource()
-  src.buffer = decoded
+  const dur = decoded.duration
+  const BYTES_PER_SAMPLE = 2 // 16-bit
+
+  // Try stereo first — pick the highest rate that fits
+  let numChannels = 2
+  let targetRate  = Math.floor(TARGET_BYTES / (dur * numChannels * BYTES_PER_SAMPLE))
+  if (targetRate < 22050) {
+    // Stereo at any acceptable rate won't fit — fall back to mono
+    numChannels = 1
+    targetRate  = Math.floor(TARGET_BYTES / (dur * numChannels * BYTES_PER_SAMPLE))
+  }
+  targetRate = Math.min(44100, targetRate)
+
+  const offCtx = new OfflineAudioContext(numChannels, Math.ceil(dur * targetRate), targetRate)
+  const src    = offCtx.createBufferSource()
+  src.buffer   = decoded
   src.connect(offCtx.destination)
   src.start(0)
   const rendered = await offCtx.startRendering()
 
-  const pcm = rendered.getChannelData(0)
-  const wavBuf = new ArrayBuffer(44 + pcm.length * 2)
-  const view = new DataView(wavBuf)
+  // Interleave channels into a single Int16 buffer
+  const totalSamples = rendered.length * numChannels
+  const wavBuf = new ArrayBuffer(44 + totalSamples * BYTES_PER_SAMPLE)
+  const view   = new DataView(wavBuf)
   function str(off: number, s: string) { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)) }
-  str(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true)
+  const byteRate  = targetRate * numChannels * BYTES_PER_SAMPLE
+  const blockAlign = numChannels * BYTES_PER_SAMPLE
+  str(0, 'RIFF'); view.setUint32(4, 36 + totalSamples * BYTES_PER_SAMPLE, true)
   str(8, 'WAVE'); str(12, 'fmt ')
-  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true)
-  view.setUint32(24, targetRate, true); view.setUint32(28, targetRate * 2, true)
-  view.setUint16(32, 2, true); view.setUint16(34, 16, true)
-  str(36, 'data'); view.setUint32(40, pcm.length * 2, true)
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)              // PCM
+  view.setUint16(22, numChannels, true)
+  view.setUint32(24, targetRate, true)
+  view.setUint32(28, byteRate, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, 16, true)             // 16-bit
+  str(36, 'data'); view.setUint32(40, totalSamples * BYTES_PER_SAMPLE, true)
+
+  const channels = Array.from({ length: numChannels }, (_, c) => rendered.getChannelData(c))
   let off = 44
-  for (let i = 0; i < pcm.length; i++) {
-    const s = Math.max(-1, Math.min(1, pcm[i]))
-    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true)
-    off += 2
+  for (let i = 0; i < rendered.length; i++) {
+    for (let c = 0; c < numChannels; c++) {
+      const s = Math.max(-1, Math.min(1, channels[c][i]))
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+      off += 2
+    }
   }
-  onStatus('Done compressing')
-  return new File([new Blob([wavBuf], { type: 'audio/wav' })], file.name.replace(/\.[^.]+$/, '_compressed.wav'), { type: 'audio/wav' })
+
+  onStatus('')
+  return new File(
+    [new Blob([wavBuf], { type: 'audio/wav' })],
+    file.name.replace(/\.[^.]+$/, '_converted.wav'),
+    { type: 'audio/wav' }
+  )
 }
 
 function getDomain(url: string): string {
@@ -317,7 +348,7 @@ function ManageVersionsModal({ track, onClose, onTrackUpdated }: {
   async function uploadVersion() {
     if (!newName.trim() || !newFile || !user) return
     setUploading(true); setUploadErr('')
-    const fileToUpload = await maybeCompressAudio(newFile, msg => setUploadErr(msg))
+    const fileToUpload = await maybeCompressAudio(newFile, () => {})
     setUploadErr('')
     const ext = fileToUpload.name.split('.').pop()
     const path = `${user.id}/project-tracks/${track.id}-${Date.now()}.${ext}`
@@ -442,19 +473,20 @@ function AddTrackModal({ projectId, userId, onClose, onAdded }: {
   const [notes, setNotes]           = useState('')
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
+  const [status, setStatus]         = useState('')
 
   async function handleAdd() {
     if (!title.trim() || !audioFile) return
-    setSaving(true); setError('')
+    setSaving(true); setError(''); setStatus('')
 
     // 1. Get position
     const { count } = await supabase.from('project_tracks').select('*', { count: 'exact', head: true }).eq('project_id', projectId)
     const position = count ?? 0
 
     // 2. Maybe compress + get duration
-    const fileToUpload = await maybeCompressAudio(audioFile, msg => setError(msg))
+    const fileToUpload = await maybeCompressAudio(audioFile, msg => setStatus(msg))
     const duration = await getAudioDuration(fileToUpload)
-    setError('')
+    setStatus('Uploading…')
 
     // 3. Insert track (audio_url placeholder)
     const { data: trackData, error: trackErr } = await supabase.from('project_tracks').insert({
@@ -471,9 +503,9 @@ function AddTrackModal({ projectId, userId, onClose, onAdded }: {
     const path = `${userId}/project-tracks/${trackId}-${Date.now()}.${ext}`
     const { error: audioErr } = await supabase.storage.from('audio').upload(path, fileToUpload)
     if (audioErr) {
-      // Clean up the orphaned track record so it doesn't show up as a broken entry
       await supabase.from('project_tracks').delete().eq('id', trackId)
       setError('Audio upload failed: ' + audioErr.message)
+      setStatus('')
       setSaving(false)
       return
     }
@@ -550,13 +582,14 @@ function AddTrackModal({ projectId, userId, onClose, onAdded }: {
           </div>
         </div>
 
-        {error && <p style={{ fontSize: 12, color: '#FF4444', marginTop: 12 }}>{error}</p>}
+        {status && <p style={{ fontSize: 12, color: '#888', marginTop: 12 }}>{status}</p>}
+        {error && <p style={{ fontSize: 12, color: '#FF4444', marginTop: 6 }}>{error}</p>}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #2a2a2a', color: '#888', borderRadius: 8, padding: '10px 18px', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
           <button onClick={handleAdd} disabled={!title.trim() || !audioFile || saving}
             style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: !title.trim() || !audioFile || saving ? 'not-allowed' : 'pointer', opacity: !title.trim() || !audioFile || saving ? 0.5 : 1, transition: 'opacity 0.15s' }}>
-            {saving ? 'Uploading…' : 'Add to Project'}
+            {saving ? (status || 'Working…') : 'Add to Project'}
           </button>
         </div>
       </div>
