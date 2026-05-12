@@ -18,6 +18,7 @@ interface Project {
   target_drop_date: string | null
   type: string
   inspiration_items: InspirationItem[]
+  cover_art_url: string | null
   status: string
   created_at: string
   updated_at: string
@@ -127,7 +128,7 @@ function ProjectCard({ project, onClick, onDelete }: {
   const menuRef = useRef<HTMLDivElement>(null)
   const trackCount = project.project_tracks?.length ?? 0
   const typeLabel = computeType(trackCount, project.type)
-  const firstImage = project.inspiration_items?.find(i => i.type === 'image')?.url ?? null
+  const firstImage = project.cover_art_url ?? null
   const formattedDate = project.updated_at
     ? new Date(project.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     : null
