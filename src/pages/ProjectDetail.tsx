@@ -969,15 +969,37 @@ export function ProjectDetail() {
 
   useEffect(() => {
     if (!user || !id) return
-    Promise.all([
-      supabase.from('projects').select('*').eq('id', id).eq('user_id', user.id).single(),
-      supabase.from('project_tracks').select('*, track_versions(*)').eq('project_id', id).eq('user_id', user.id).order('position'),
-    ]).then(([pRes, tRes]) => {
+    async function load() {
+      // Load project + tracks in parallel, then fetch versions separately.
+      // Using two FKs between project_tracks <-> track_versions makes the
+      // joined select('*, track_versions(*)') ambiguous in PostgREST and it
+      // silently returns null — so we merge them manually instead.
+      const [pRes, tRes] = await Promise.all([
+        supabase.from('projects').select('*').eq('id', id).eq('user_id', user!.id).single(),
+        supabase.from('project_tracks').select('*').eq('project_id', id).eq('user_id', user!.id).order('position'),
+      ])
       if (!pRes.data) { setNotFound(true); setLoading(false); return }
+      const rawTracks = (tRes.data ?? []) as Omit<ProjectTrack, 'track_versions'>[]
+      // Fetch all versions for these tracks in one query
+      let versions: TrackVersion[] = []
+      if (rawTracks.length > 0) {
+        const { data: vData } = await supabase
+          .from('track_versions')
+          .select('*')
+          .in('track_id', rawTracks.map(t => t.id))
+        versions = (vData ?? []) as TrackVersion[]
+      }
+      // Group versions by track_id
+      const byTrack: Record<string, TrackVersion[]> = {}
+      for (const v of versions) {
+        if (!byTrack[v.track_id]) byTrack[v.track_id] = []
+        byTrack[v.track_id].push(v)
+      }
       setProject(pRes.data as Project)
-      setTracks((tRes.data as ProjectTrack[]) ?? [])
+      setTracks(rawTracks.map(t => ({ ...t, track_versions: byTrack[t.id] ?? [] } as ProjectTrack)))
       setLoading(false)
-    })
+    }
+    load()
   }, [user, id])
 
   // Auto-update type when track count changes
