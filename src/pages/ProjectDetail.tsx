@@ -759,54 +759,230 @@ function TrackRow({ track, index, isActive, isPlaying, onPlay, onDelete, onUpdat
 }
 const mitem: React.CSSProperties = { display: 'block', width: '100%', textAlign: 'left', background: 'transparent', border: 'none', color: '#ccc', fontSize: 13, padding: '8px 12px', cursor: 'pointer', borderRadius: 5 }
 
-/* ── Audio Player ── */
+/* ── Audio Player (Web Audio API — gapless) ── */
 
 function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
   tracks: ProjectTrack[]
   activeIdx: number | null
   onSetIdx: (idx: number | null) => void
 }) {
-  const audioRef   = useRef<HTMLAudioElement>(null)
-  const progressRef = useRef<HTMLDivElement>(null)
-  const [isPlaying, setIsPlaying]   = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration]       = useState(0)
-  const [volume, setVolume]           = useState(1)
+  // Web Audio API refs
+  const acRef       = useRef<AudioContext | null>(null)
+  const gainRef     = useRef<GainNode | null>(null)
+  const srcRef      = useRef<AudioBufferSourceNode | null>(null)   // currently playing node
+  const schedSrcRef = useRef<AudioBufferSourceNode | null>(null)   // pre-scheduled next node
+  const bufCache    = useRef(new Map<string, AudioBuffer>())
+  const rafRef      = useRef(0)
 
+  // Timing refs — updated on every playAt/scheduleNext, read inside RAF
+  // Position formula: ac.currentTime - startAcRef  (where startAcRef = acTime - offset)
+  const startAcRef   = useRef(0)   // adjusted so (ac.currentTime - startAcRef) = track position
+  const durRef       = useRef(0)
+  const playingRef   = useRef(false)
+  const activeIdxRef = useRef<number | null>(null)
+  const autoAdvRef   = useRef<number | null>(null)  // idx being auto-advanced (skip useEffect)
+  const schedDoneRef = useRef(false)
+
+  // UI state
+  const [isPlaying,   setIsPlaying]   = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration,    setDuration]    = useState(0)
+  const [volume,      setVolume]      = useState(1)
+  const [minimized,   setMinimized]   = useState(false)
+  const [buffering,   setBuffering]   = useState(false)
+  const progressRef = useRef<HTMLDivElement>(null)
   const activeTrack = activeIdx !== null ? tracks[activeIdx] : null
 
+  // ── AudioContext lazy init ──
+  function ensureAc(): AudioContext {
+    if (!acRef.current) {
+      acRef.current = new AudioContext()
+      gainRef.current = acRef.current.createGain()
+      gainRef.current.connect(acRef.current.destination)
+      gainRef.current.gain.value = volume
+    }
+    return acRef.current
+  }
+
+  // ── Buffer fetch + decode with cache ──
+  async function loadBuf(url: string): Promise<AudioBuffer> {
+    if (bufCache.current.has(url)) return bufCache.current.get(url)!
+    const res  = await fetch(url)
+    const data = await res.arrayBuffer()
+    const buf  = await ensureAc().decodeAudioData(data)
+    bufCache.current.set(url, buf)
+    return buf
+  }
+
+  // ── Silently preload next track's buffer in background ──
+  function preloadNext(idx: number) {
+    if (idx + 1 >= tracks.length) return
+    const url = getActiveAudioUrl(tracks[idx + 1])
+    if (!bufCache.current.has(url)) loadBuf(url).catch(() => {})
+  }
+
+  // ── Stop whatever is currently playing ──
+  function stopCurrent() {
+    if (srcRef.current) {
+      srcRef.current.onended = null
+      try { srcRef.current.stop() } catch {}
+      srcRef.current = null
+    }
+    if (schedSrcRef.current) {
+      try { schedSrcRef.current.stop() } catch {}
+      schedSrcRef.current = null
+    }
+    schedDoneRef.current = false
+  }
+
+  // ── Schedule next track to start exactly when current ends (gapless) ──
+  async function scheduleNext(fromIdx: number) {
+    if (schedDoneRef.current || fromIdx >= tracks.length - 1) return
+    schedDoneRef.current = true
+    const ac = ensureAc()
+    try {
+      const buf  = await loadBuf(getActiveAudioUrl(tracks[fromIdx + 1]))
+      // Exact audioContext time when current track ends
+      const when = startAcRef.current + durRef.current
+      const nxt  = ac.createBufferSource()
+      nxt.buffer = buf
+      nxt.connect(gainRef.current!)
+      nxt.start(Math.max(when, ac.currentTime))
+      schedSrcRef.current = nxt
+
+      // At the moment the next track begins, update all state/refs
+      const msDelay = Math.max(0, (when - ac.currentTime) * 1000)
+      setTimeout(() => {
+        srcRef.current      = nxt
+        schedSrcRef.current = null
+        startAcRef.current  = when      // so (ac.currentTime - when) = position in new track
+        durRef.current      = buf.duration
+        schedDoneRef.current = false
+        setDuration(buf.duration)
+        setCurrentTime(0)
+
+        // Tell React which track is active — but flag it so useEffect doesn't re-trigger playAt
+        activeIdxRef.current = fromIdx + 1
+        autoAdvRef.current   = fromIdx + 1
+        onSetIdx(fromIdx + 1)
+        setTimeout(() => { autoAdvRef.current = null }, 100)
+
+        // When THIS next track ends, schedule the one after it
+        nxt.onended = () => {
+          if (srcRef.current !== nxt) return
+          const nextIdx = fromIdx + 1
+          if (nextIdx < tracks.length - 1) {
+            scheduleNext(nextIdx)
+          } else {
+            playingRef.current = false
+            setIsPlaying(false)
+            setCurrentTime(0)
+          }
+        }
+      }, msDelay)
+    } catch {
+      schedDoneRef.current = false
+    }
+  }
+
+  // ── Core play: start a track from a given offset position ──
+  async function playAt(url: string, offset: number) {
+    const ac = ensureAc()
+    if (ac.state === 'suspended') await ac.resume()
+    stopCurrent()
+
+    setBuffering(true)
+    const buf = await loadBuf(url)
+    setBuffering(false)
+
+    const src = ac.createBufferSource()
+    src.buffer = buf
+    src.connect(gainRef.current!)
+    src.start(0, offset)
+    srcRef.current = src
+
+    // startAcRef adjusted so (ac.currentTime - startAcRef) === offset immediately
+    startAcRef.current = ac.currentTime - offset
+    durRef.current     = buf.duration
+    playingRef.current = true
+
+    setDuration(buf.duration)
+    setIsPlaying(true)
+
+    // Fallback onended in case scheduleNext didn't fire in time
+    src.onended = () => {
+      if (srcRef.current !== src) return
+      const idx = activeIdxRef.current
+      if (idx !== null && idx < tracks.length - 1 && !schedDoneRef.current) {
+        scheduleNext(idx)
+      } else if (idx === null || idx >= tracks.length - 1) {
+        playingRef.current = false
+        setIsPlaying(false)
+        setCurrentTime(0)
+      }
+    }
+
+    // Immediately start fetching the next track's buffer
+    if (activeIdxRef.current !== null) preloadNext(activeIdxRef.current)
+  }
+
+  // ── RAF loop: update currentTime display + trigger schedule when 5s remain ──
   useEffect(() => {
-    const audio = audioRef.current
-    if (!audio || activeIdx === null || !tracks[activeIdx]) return
-    audio.src = getActiveAudioUrl(tracks[activeIdx])
-    audio.volume = volume
-    audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIdx])
+    let frame = 0
+    function tick() {
+      rafRef.current = requestAnimationFrame(tick)
+      if (!playingRef.current || !acRef.current) return
+      frame++
+      if (frame % 4 !== 0) return   // ~15 fps is enough for a time display
+      const pos = Math.max(0, Math.min(acRef.current.currentTime - startAcRef.current, durRef.current))
+      setCurrentTime(pos)
+      // Trigger gapless scheduling 5 seconds before the end
+      if (durRef.current - pos < 5 && !schedDoneRef.current && activeIdxRef.current !== null) {
+        scheduleNext(activeIdxRef.current)
+      }
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, []) // eslint-disable-line
 
-  function handleTimeUpdate() {
-    const a = audioRef.current
-    if (!a) return
-    setCurrentTime(a.currentTime)
-    setDuration(a.duration || 0)
-  }
+  // ── Play when user selects a track (skip if auto-advance already handled it) ──
+  useEffect(() => {
+    activeIdxRef.current = activeIdx
+    if (activeIdx === null) return
+    if (autoAdvRef.current === activeIdx) return   // already playing via gapless schedule
+    playAt(getActiveAudioUrl(tracks[activeIdx]), 0)
+  }, [activeIdx]) // eslint-disable-line
 
-  function handleEnded() {
-    if (activeIdx !== null && activeIdx < tracks.length - 1) onSetIdx(activeIdx + 1)
-    else { setIsPlaying(false); setCurrentTime(0) }
-  }
+  // ── Cleanup on unmount ──
+  useEffect(() => () => {
+    cancelAnimationFrame(rafRef.current)
+    stopCurrent()
+    acRef.current?.close()
+  }, []) // eslint-disable-line
 
+  // ── Controls ──
   function togglePlay() {
-    const a = audioRef.current
-    if (!a || activeIdx === null) return
-    if (isPlaying) { a.pause(); setIsPlaying(false) } else { a.play(); setIsPlaying(true) }
+    const ac = acRef.current
+    if (!ac || activeIdx === null) return
+    if (isPlaying) {
+      ac.suspend()
+      playingRef.current = false
+      setIsPlaying(false)
+    } else {
+      ac.resume()
+      playingRef.current = true
+      setIsPlaying(true)
+    }
   }
 
   function prev() {
     if (activeIdx === null) return
-    const a = audioRef.current
-    if (a && currentTime > 3) { a.currentTime = 0; setCurrentTime(0) }
-    else if (activeIdx > 0) onSetIdx(activeIdx - 1)
+    const pos = acRef.current ? acRef.current.currentTime - startAcRef.current : 0
+    if (pos > 3) {
+      playAt(getActiveAudioUrl(tracks[activeIdx]), 0)
+    } else if (activeIdx > 0) {
+      onSetIdx(activeIdx - 1)
+    }
   }
 
   function next() {
@@ -814,41 +990,36 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
   }
 
   function seekClick(e: React.MouseEvent<HTMLDivElement>) {
-    const a = audioRef.current
-    if (!a || !progressRef.current || !duration) return
-    const rect = progressRef.current.getBoundingClientRect()
-    a.currentTime = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * duration
+    if (!progressRef.current || !durRef.current || activeIdx === null) return
+    const rect  = progressRef.current.getBoundingClientRect()
+    const pct   = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    playAt(getActiveAudioUrl(tracks[activeIdx]), pct * durRef.current)
   }
 
   function handleVolume(e: ChangeEvent<HTMLInputElement>) {
     const v = parseFloat(e.target.value)
     setVolume(v)
-    if (audioRef.current) audioRef.current.volume = v
+    if (gainRef.current) gainRef.current.gain.value = v
   }
 
-  const [minimized, setMinimized] = useState(false)
-
   if (activeIdx === null || !activeTrack) return null
-
   const pct = duration > 0 ? (currentTime / duration) * 100 : 0
 
+  // ── Mini player ──
   if (minimized) {
     return (
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(8,8,8,0.97)', borderTop: '0.5px solid #1a1a1a', backdropFilter: 'blur(20px)', zIndex: 100, padding: '0 24px' }}>
-        <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleTimeUpdate} onEnded={handleEnded} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} />
-        {/* Progress bar at very top of mini player */}
-        <div onClick={seekClick} ref={progressRef} style={{ height: 2, background: '#1a1a1a', cursor: 'pointer', marginBottom: 0 }}>
+        <div ref={progressRef} onClick={seekClick} style={{ height: 2, background: '#1a1a1a', cursor: 'pointer' }}>
           <div style={{ width: `${pct}%`, height: '100%', background: '#C8FF00' }} />
         </div>
         <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, height: 44 }}>
           <button onClick={togglePlay} style={{ background: 'transparent', border: 'none', color: '#C8FF00', cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}>
             {isPlaying
               ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
-              : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-            }
+              : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>}
           </button>
-          <p style={{ flex: 1, fontSize: 12, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
-            {formatTrackTitle(activeTrack.title, activeTrack.features ?? [])}
+          <p style={{ flex: 1, fontSize: 12, fontWeight: 600, color: buffering ? '#666' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+            {buffering ? 'Loading…' : formatTrackTitle(activeTrack.title, activeTrack.features ?? [])}
           </p>
           <span style={{ fontSize: 10, color: '#3a3a3a', flexShrink: 0 }}>{formatTime(currentTime)} / {formatTime(duration)}</span>
           <button onClick={() => setMinimized(false)} title="Expand player"
@@ -862,18 +1033,19 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
     )
   }
 
+  // ── Full player ──
   return (
     <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(8,8,8,0.97)', borderTop: '0.5px solid #1a1a1a', backdropFilter: 'blur(20px)', zIndex: 100, padding: '10px 24px' }}>
-      <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleTimeUpdate} onEnded={handleEnded} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} />
       <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 20 }}>
-
         {/* Track info */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: 190, flexShrink: 0, minWidth: 0 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 5, overflow: 'hidden', background: '#1a1a1a', border: '0.5px solid #222', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 5, background: '#1a1a1a', border: '0.5px solid #222', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2a2a2a" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
           </div>
           <div style={{ minWidth: 0 }}>
-            <p style={{ fontSize: 12, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatTrackTitle(activeTrack.title, activeTrack.features ?? [])}</p>
+            <p style={{ fontSize: 12, fontWeight: 600, color: buffering ? '#666' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {buffering ? 'Loading…' : formatTrackTitle(activeTrack.title, activeTrack.features ?? [])}
+            </p>
             <p style={{ fontSize: 10, color: '#3a3a3a', marginTop: 1 }}>{getActiveVersion(activeTrack)?.version_name ?? ''} · {activeIdx + 1}/{tracks.length}</p>
           </div>
         </div>
@@ -887,8 +1059,7 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
             <button onClick={togglePlay} style={{ ...pBtn, width: 34, height: 34, background: '#C8FF00', border: 'none', color: '#000', borderRadius: '50%' }}>
               {isPlaying
                 ? <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
-                : <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-              }
+                : <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>}
             </button>
             <button onClick={next} style={pBtn}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 4 15 12 5 20 5 4" /><line x1="19" y1="5" x2="19" y2="19" /></svg>
@@ -897,7 +1068,7 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 480 }}>
             <span style={{ fontSize: 10, color: '#3a3a3a', width: 28, textAlign: 'right', flexShrink: 0 }}>{formatTime(currentTime)}</span>
             <div ref={progressRef} onClick={seekClick} style={{ flex: 1, height: 3, background: '#1e1e1e', borderRadius: 2, cursor: 'pointer' }}>
-              <div style={{ width: `${pct}%`, height: '100%', background: '#C8FF00', borderRadius: 2, transition: 'width 0.1s linear' }} />
+              <div style={{ width: `${pct}%`, height: '100%', background: '#C8FF00', borderRadius: 2 }} />
             </div>
             <span style={{ fontSize: 10, color: '#3a3a3a', width: 28, flexShrink: 0 }}>{formatTime(duration)}</span>
           </div>
