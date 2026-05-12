@@ -171,22 +171,45 @@ function getActiveAudioUrl(track: ProjectTrack): string {
 
 /* ── Tag Input ── */
 
-function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) => void }) {
+interface TagInputHandle { flush: () => string[] }
+
+const TagInput = forwardRef<TagInputHandle, { tags: string[]; onChange: (t: string[]) => void }>(
+function TagInput({ tags, onChange }, ref) {
   const [input, setInput] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  // Mirror tags+input in refs so flush() always sees latest values
+  const tagsRef  = useRef(tags)
+  const inputValRef = useRef(input)
+  useEffect(() => { tagsRef.current = tags }, [tags])
+  useEffect(() => { inputValRef.current = input }, [input])
 
   function commit(val: string) {
     const v = val.trim().replace(/,+$/, '')
-    if (v && !tags.includes(v)) onChange([...tags, v])
+    if (v && !tagsRef.current.includes(v)) onChange([...tagsRef.current, v])
     setInput('')
   }
+
+  // Expose flush() so parent can commit pending text before saving.
+  // Returns the full tags array (including any just-committed pending text).
+  useImperativeHandle(ref, () => ({
+    flush: () => {
+      const v = inputValRef.current.trim()
+      if (!v) return tagsRef.current
+      const existing = tagsRef.current
+      const next = existing.includes(v) ? existing : [...existing, v]
+      onChange(next)
+      setInput('')
+      return next
+    }
+  }), []) // eslint-disable-line
 
   function handleChange(e: ChangeEvent<HTMLInputElement>) {
     const val = e.target.value
     if (val.includes(',')) {
       const parts = val.split(',')
-      parts.slice(0, -1).forEach(p => { const t = p.trim(); if (t && !tags.includes(t)) tags = [...tags, t] })
-      onChange(tags)
+      let cur = tagsRef.current
+      parts.slice(0, -1).forEach(p => { const t = p.trim(); if (t && !cur.includes(t)) cur = [...cur, t] })
+      onChange(cur)
       setInput(parts[parts.length - 1])
     } else {
       setInput(val)
@@ -219,7 +242,7 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) 
       />
     </div>
   )
-}
+})
 
 /* ── Cover Art Upload ── */
 
@@ -627,6 +650,7 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onD
   const [editingFeatures, setEditingFeatures] = useState(false)
   const [editFeatures, setEditFeatures] = useState<string[]>(track.features ?? [])
   const menuRef = useRef<HTMLDivElement>(null)
+  const tagInputRef = useRef<TagInputHandle>(null)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -655,8 +679,10 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onD
   }
 
   async function saveFeatures() {
-    await supabase.from('project_tracks').update({ features: editFeatures }).eq('id', track.id)
-    onUpdate({ ...track, features: editFeatures })
+    // flush() commits any pending typed text and returns the final tags array synchronously
+    const latest = tagInputRef.current?.flush() ?? editFeatures
+    await supabase.from('project_tracks').update({ features: latest }).eq('id', track.id)
+    onUpdate({ ...track, features: latest })
     setEditingFeatures(false)
   }
 
@@ -756,7 +782,7 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onD
       {editingFeatures && (
         <div style={{ margin: '4px 0 8px 50px', background: '#0d0d0d', border: '0.5px solid #1a1a1a', borderRadius: 8, padding: 14 }}>
           <p style={{ fontSize: 10, fontWeight: 700, color: '#444', letterSpacing: '0.8px', marginBottom: 8 }}>FEATURED ARTISTS</p>
-          <TagInput tags={editFeatures} onChange={setEditFeatures} />
+          <TagInput ref={tagInputRef} tags={editFeatures} onChange={setEditFeatures} />
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
             <button onClick={() => { setEditingFeatures(false); setEditFeatures(track.features ?? []) }} style={{ background: 'transparent', border: '1px solid #2a2a2a', color: '#555', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
             <button onClick={saveFeatures} style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Save</button>
