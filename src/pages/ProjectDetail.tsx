@@ -77,6 +77,46 @@ async function getAudioDuration(file: File): Promise<number> {
   })
 }
 
+// Compress large audio files (>45 MB) by resampling to 22050 Hz mono WAV.
+// Uses OfflineAudioContext so it's much faster than real-time.
+const COMPRESS_THRESHOLD = 45 * 1024 * 1024 // 45 MB
+
+async function maybeCompressAudio(file: File, onStatus: (msg: string) => void): Promise<File> {
+  if (file.size <= COMPRESS_THRESHOLD) return file
+  onStatus('Compressing audio…')
+  const arrayBuffer = await file.arrayBuffer()
+  const decodeCtx = new AudioContext()
+  const decoded = await decodeCtx.decodeAudioData(arrayBuffer)
+  await decodeCtx.close()
+
+  const targetRate = 22050
+  const offCtx = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetRate), targetRate)
+  const src = offCtx.createBufferSource()
+  src.buffer = decoded
+  src.connect(offCtx.destination)
+  src.start(0)
+  const rendered = await offCtx.startRendering()
+
+  const pcm = rendered.getChannelData(0)
+  const wavBuf = new ArrayBuffer(44 + pcm.length * 2)
+  const view = new DataView(wavBuf)
+  function str(off: number, s: string) { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)) }
+  str(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true)
+  str(8, 'WAVE'); str(12, 'fmt ')
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true)
+  view.setUint32(24, targetRate, true); view.setUint32(28, targetRate * 2, true)
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true)
+  str(36, 'data'); view.setUint32(40, pcm.length * 2, true)
+  let off = 44
+  for (let i = 0; i < pcm.length; i++) {
+    const s = Math.max(-1, Math.min(1, pcm[i]))
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+    off += 2
+  }
+  onStatus('Done compressing')
+  return new File([new Blob([wavBuf], { type: 'audio/wav' })], file.name.replace(/\.[^.]+$/, '_compressed.wav'), { type: 'audio/wav' })
+}
+
 function getDomain(url: string): string {
   try { return new URL(url).hostname.replace('www.', '') } catch { return url }
 }
@@ -277,9 +317,11 @@ function ManageVersionsModal({ track, onClose, onTrackUpdated }: {
   async function uploadVersion() {
     if (!newName.trim() || !newFile || !user) return
     setUploading(true); setUploadErr('')
-    const ext = newFile.name.split('.').pop()
+    const fileToUpload = await maybeCompressAudio(newFile, msg => setUploadErr(msg))
+    setUploadErr('')
+    const ext = fileToUpload.name.split('.').pop()
     const path = `${user.id}/project-tracks/${track.id}-${Date.now()}.${ext}`
-    const { error } = await supabase.storage.from('audio').upload(path, newFile)
+    const { error } = await supabase.storage.from('audio').upload(path, fileToUpload)
     if (error) { setUploadErr(error.message); setUploading(false); return }
     const { data: urlData } = supabase.storage.from('audio').getPublicUrl(path)
     const { data: vData } = await supabase.from('track_versions').insert({
@@ -409,8 +451,10 @@ function AddTrackModal({ projectId, userId, onClose, onAdded }: {
     const { count } = await supabase.from('project_tracks').select('*', { count: 'exact', head: true }).eq('project_id', projectId)
     const position = count ?? 0
 
-    // 2. Get duration
-    const duration = await getAudioDuration(audioFile)
+    // 2. Maybe compress + get duration
+    const fileToUpload = await maybeCompressAudio(audioFile, msg => setError(msg))
+    const duration = await getAudioDuration(fileToUpload)
+    setError('')
 
     // 3. Insert track (audio_url placeholder)
     const { data: trackData, error: trackErr } = await supabase.from('project_tracks').insert({
@@ -423,10 +467,16 @@ function AddTrackModal({ projectId, userId, onClose, onAdded }: {
     const trackId = (trackData as ProjectTrack).id
 
     // 4. Upload audio
-    const ext = audioFile.name.split('.').pop()
+    const ext = fileToUpload.name.split('.').pop()
     const path = `${userId}/project-tracks/${trackId}-${Date.now()}.${ext}`
-    const { error: audioErr } = await supabase.storage.from('audio').upload(path, audioFile)
-    if (audioErr) { setError('Audio upload failed: ' + audioErr.message); setSaving(false); return }
+    const { error: audioErr } = await supabase.storage.from('audio').upload(path, fileToUpload)
+    if (audioErr) {
+      // Clean up the orphaned track record so it doesn't show up as a broken entry
+      await supabase.from('project_tracks').delete().eq('id', trackId)
+      setError('Audio upload failed: ' + audioErr.message)
+      setSaving(false)
+      return
+    }
     const { data: urlData } = supabase.storage.from('audio').getPublicUrl(path)
     const audioUrl = urlData.publicUrl
 
@@ -743,9 +793,41 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
     if (audioRef.current) audioRef.current.volume = v
   }
 
+  const [minimized, setMinimized] = useState(false)
+
   if (activeIdx === null || !activeTrack) return null
 
   const pct = duration > 0 ? (currentTime / duration) * 100 : 0
+
+  if (minimized) {
+    return (
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(8,8,8,0.97)', borderTop: '0.5px solid #1a1a1a', backdropFilter: 'blur(20px)', zIndex: 100, padding: '0 24px' }}>
+        <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleTimeUpdate} onEnded={handleEnded} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} />
+        {/* Progress bar at very top of mini player */}
+        <div onClick={seekClick} ref={progressRef} style={{ height: 2, background: '#1a1a1a', cursor: 'pointer', marginBottom: 0 }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: '#C8FF00' }} />
+        </div>
+        <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, height: 44 }}>
+          <button onClick={togglePlay} style={{ background: 'transparent', border: 'none', color: '#C8FF00', cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}>
+            {isPlaying
+              ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+              : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+            }
+          </button>
+          <p style={{ flex: 1, fontSize: 12, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+            {formatTrackTitle(activeTrack.title, activeTrack.features ?? [])}
+          </p>
+          <span style={{ fontSize: 10, color: '#3a3a3a', flexShrink: 0 }}>{formatTime(currentTime)} / {formatTime(duration)}</span>
+          <button onClick={() => setMinimized(false)} title="Expand player"
+            style={{ background: 'transparent', border: '1px solid #2a2a2a', borderRadius: 5, color: '#555', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', flexShrink: 0, transition: 'border-color 0.15s, color 0.15s' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = '#C8FF00'; e.currentTarget.style.color = '#C8FF00' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = '#2a2a2a'; e.currentTarget.style.color = '#555' }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="18 15 12 9 6 15" /></svg>
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(8,8,8,0.97)', borderTop: '0.5px solid #1a1a1a', backdropFilter: 'blur(20px)', zIndex: 100, padding: '10px 24px' }}>
@@ -788,11 +870,17 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
           </div>
         </div>
 
-        {/* Volume */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, width: 120, justifyContent: 'flex-end', flexShrink: 0 }}>
+        {/* Volume + minimize */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: 140, justifyContent: 'flex-end', flexShrink: 0 }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2e2e2e" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />{volume > 0 && <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />}</svg>
           <input type="range" min={0} max={1} step={0.01} value={volume} onChange={handleVolume}
-            style={{ width: 72, accentColor: '#C8FF00', cursor: 'pointer' }} />
+            style={{ width: 60, accentColor: '#C8FF00', cursor: 'pointer' }} />
+          <button onClick={() => setMinimized(true)} title="Minimize player"
+            style={{ background: 'transparent', border: '1px solid #2a2a2a', borderRadius: 5, color: '#555', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', flexShrink: 0, transition: 'border-color 0.15s, color 0.15s' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = '#C8FF00'; e.currentTarget.style.color = '#C8FF00' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = '#2a2a2a'; e.currentTarget.style.color = '#555' }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
+          </button>
         </div>
       </div>
     </div>
