@@ -25,6 +25,7 @@ interface Project {
   cover_art_url: string | null
   inspiration_items: InspirationItem[]
   status: string
+  theme: Theme | null
 }
 
 interface InspirationItem {
@@ -169,6 +170,108 @@ function getActiveAudioUrl(track: ProjectTrack): string {
   return getActiveVersion(track)?.audio_url ?? track.audio_url
 }
 
+/* ── Theme ── */
+
+interface Theme {
+  bg_color: string
+  accent_color: string
+  bg_style: 'gradient' | 'solid' | 'stars' | 'grain'
+  pattern: string
+  source: 'manual' | 'auto'
+}
+
+const DEFAULT_THEME: Theme = {
+  bg_color: '#0A0A0A',
+  accent_color: '#C8FF00',
+  bg_style: 'gradient',
+  pattern: 'none',
+  source: 'manual',
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '')
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)]
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return '#' + [r,g,b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2,'0')).join('')
+}
+
+function accentAlpha(hex: string, alpha: number): string {
+  const [r,g,b] = hexToRgb(hex)
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
+async function extractDominantColor(imgUrl: string): Promise<string> {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      try {
+        const SIZE = 60
+        const canvas = document.createElement('canvas')
+        canvas.width = SIZE; canvas.height = SIZE
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(img, 0, 0, SIZE, SIZE)
+        const { data } = ctx.getImageData(0, 0, SIZE, SIZE)
+        const buckets: Record<string, number> = {}
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 128) continue
+          const r = Math.round(data[i]   / 24) * 24
+          const g = Math.round(data[i+1] / 24) * 24
+          const b = Math.round(data[i+2] / 24) * 24
+          const k = `${r},${g},${b}`
+          buckets[k] = (buckets[k] ?? 0) + 1
+        }
+        const [top] = Object.entries(buckets).sort((a, b) => b[1] - a[1])
+        if (!top) { resolve('#0A0A0A'); return }
+        const [r, g, b] = top[0].split(',').map(Number)
+        resolve(rgbToHex(r * 0.18, g * 0.18, b * 0.18))
+      } catch { resolve('#0A0A0A') }
+    }
+    img.onerror = () => resolve('#0A0A0A')
+    img.src = imgUrl
+  })
+}
+
+function getPageBackground(theme: Theme): string {
+  if (theme.bg_style === 'solid' || theme.bg_style === 'stars' || theme.bg_style === 'grain') return theme.bg_color
+  return `radial-gradient(ellipse at 50% -10%, ${theme.bg_color} 0%, #0A0A0A 65%)`
+}
+
+function StarsLayer({ bgColor }: { bgColor: string }) {
+  const starsRef = useRef('')
+  if (!starsRef.current) {
+    const [r, g, b] = hexToRgb(bgColor)
+    const sc = rgbToHex(Math.min(255, r + 35), Math.min(255, g + 35), Math.min(255, b + 35))
+    starsRef.current = Array.from({ length: 130 }, () => {
+      const x = (Math.random() * 100).toFixed(2)
+      const y = (Math.random() * 100).toFixed(2)
+      const s = Math.random() < 0.85 ? 1 : 2
+      return `${x}vw ${y}vh 0 ${s}px ${sc}`
+    }).join(', ')
+  }
+  return (
+    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', width: 1, height: 1, borderRadius: '50%', top: 0, left: 0, boxShadow: starsRef.current }} />
+    </div>
+  )
+}
+
+function GrainLayer() {
+  return (
+    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, opacity: 0.3 }}>
+      <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0 }}>
+        <filter id="lbl-grain">
+          <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch" />
+          <feColorMatrix type="saturate" values="0" />
+        </filter>
+        <rect width="100%" height="100%" filter="url(#lbl-grain)" />
+      </svg>
+    </div>
+  )
+}
+
 /* ── Tag Input ── */
 
 interface TagInputHandle { flush: () => string[] }
@@ -246,7 +349,11 @@ function TagInput({ tags, onChange }, ref) {
 
 /* ── Cover Art Upload ── */
 
-function CoverArtUpload({ project, onUpdate }: { project: Project; onUpdate: (url: string) => void }) {
+function CoverArtUpload({ project, onUpdate, onThemeExtracted }: {
+  project: Project
+  onUpdate: (url: string) => void
+  onThemeExtracted: (color: string) => void
+}) {
   const { user } = useAuth()
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -263,6 +370,8 @@ function CoverArtUpload({ project, onUpdate }: { project: Project; onUpdate: (ur
       const { data } = supabase.storage.from('artwork').getPublicUrl(path)
       await supabase.from('projects').update({ cover_art_url: data.publicUrl, updated_at: new Date().toISOString() }).eq('id', project.id)
       onUpdate(data.publicUrl)
+      const dominant = await extractDominantColor(data.publicUrl + '?t=' + Date.now())
+      onThemeExtracted(dominant)
     }
     setUploading(false)
     e.target.value = ''
@@ -624,12 +733,13 @@ const inp: React.CSSProperties = { background: '#0f0f0f', border: '1px solid #22
 
 /* ── Track Row ── */
 
-function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onDelete, onUpdate, onManageVersions, dragHandlers }: {
+function TrackRow({ track, index, isActive, isPlaying, showFeatures, accent, onPlay, onDelete, onUpdate, onManageVersions, dragHandlers }: {
   track: ProjectTrack
   index: number
   isActive: boolean
   isPlaying: boolean
   showFeatures: boolean
+  accent: string
   onPlay: () => void
   onDelete: () => void
   onUpdate: (t: ProjectTrack) => void
@@ -702,8 +812,8 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onD
         onDragEnd={dragHandlers.onDrop}
         style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-          background: isActive ? 'rgba(200,255,0,0.04)' : dragHandlers.isDragOver ? 'rgba(255,255,255,0.02)' : 'transparent',
-          borderRadius: 8, border: `0.5px solid ${dragHandlers.isDragOver ? '#2a2a2a' : isActive ? 'rgba(200,255,0,0.15)' : 'transparent'}`,
+          background: isActive ? accentAlpha(accent, 0.04) : dragHandlers.isDragOver ? 'rgba(255,255,255,0.02)' : 'transparent',
+          borderRadius: 8, border: `0.5px solid ${dragHandlers.isDragOver ? '#2a2a2a' : isActive ? accentAlpha(accent, 0.15) : 'transparent'}`,
           transition: 'all 0.1s ease',
         }}
       >
@@ -717,16 +827,16 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onD
         </div>
 
         {/* Number */}
-        <span style={{ fontSize: 11, color: isActive ? '#C8FF00' : '#3a3a3a', fontWeight: 600, width: 18, textAlign: 'right', flexShrink: 0 }}>{index + 1}</span>
+        <span style={{ fontSize: 11, color: isActive ? accent : '#3a3a3a', fontWeight: 600, width: 18, textAlign: 'right', flexShrink: 0 }}>{index + 1}</span>
 
         {/* Info */}
         <div style={{ flex: 1, minWidth: 0 }}>
           {editingTitle ? (
             <input value={editTitle} onChange={e => setEditTitle(e.target.value)} autoFocus
               onBlur={saveTitle} onKeyDown={e => { if (e.key === 'Enter') saveTitle(); if (e.key === 'Escape') { setEditingTitle(false); setEditTitle(track.title) } }}
-              style={{ background: '#1a1a1a', border: '1px solid #C8FF00', borderRadius: 4, padding: '3px 7px', fontSize: 13, color: '#fff', outline: 'none', width: '100%', fontFamily: 'inherit' }} />
+              style={{ background: '#1a1a1a', border: `1px solid ${accent}`, borderRadius: 4, padding: '3px 7px', fontSize: 13, color: '#fff', outline: 'none', width: '100%', fontFamily: 'inherit' }} />
           ) : (
-            <p style={{ fontSize: 13, fontWeight: 600, color: isActive ? '#C8FF00' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.1px' }}>{displayTitle}</p>
+            <p style={{ fontSize: 13, fontWeight: 600, color: isActive ? accent : '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.1px' }}>{displayTitle}</p>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
             {activeVersion && (
@@ -744,7 +854,7 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onD
         {/* Notes icon */}
         <button onClick={() => { setEditNotes(track.notes ?? ''); setNotesOpen(o => !o) }} title={hasNotes ? 'View notes' : 'Add notes'}
           style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={hasNotes ? '#C8FF00' : '#2a2a2a'} strokeWidth="2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={hasNotes ? accent : '#2a2a2a'} strokeWidth="2">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
             <line x1="16" y1="13" x2="8" y2="13" /><line x1="13" y1="17" x2="8" y2="17" />
           </svg>
@@ -752,10 +862,10 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onD
 
         {/* Play */}
         <button onClick={onPlay}
-          style={{ background: isActive && isPlaying ? 'rgba(200,255,0,0.12)' : 'transparent', border: `1px solid ${isActive ? '#C8FF00' : '#222'}`, borderRadius: '50%', width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s' }}>
+          style={{ background: isActive && isPlaying ? accentAlpha(accent, 0.12) : 'transparent', border: `1px solid ${isActive ? accent : '#222'}`, borderRadius: '50%', width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s' }}>
           {isActive && isPlaying
-            ? <svg width="10" height="10" viewBox="0 0 24 24" fill="#C8FF00"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
-            : <svg width="10" height="10" viewBox="0 0 24 24" fill={isActive ? '#C8FF00' : '#555'}><polygon points="5 3 19 12 5 21 5 3" /></svg>
+            ? <svg width="10" height="10" viewBox="0 0 24 24" fill={accent}><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+            : <svg width="10" height="10" viewBox="0 0 24 24" fill={isActive ? accent : '#555'}><polygon points="5 3 19 12 5 21 5 3" /></svg>
           }
         </button>
 
@@ -785,7 +895,7 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onD
           <TagInput ref={tagInputRef} tags={editFeatures} onChange={setEditFeatures} />
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
             <button onClick={() => { setEditingFeatures(false); setEditFeatures(track.features ?? []) }} style={{ background: 'transparent', border: '1px solid #2a2a2a', color: '#555', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
-            <button onClick={saveFeatures} style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Save</button>
+            <button onClick={saveFeatures} style={{ background: accent, border: 'none', color: '#000', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Save</button>
           </div>
         </div>
       )}
@@ -797,7 +907,7 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onD
             style={{ background: 'transparent', border: 'none', outline: 'none', color: '#bbb', fontSize: 13, lineHeight: 1.6, width: '100%', resize: 'vertical', fontFamily: 'inherit' }} />
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
             <button onClick={() => setNotesOpen(false)} style={{ background: 'transparent', border: '1px solid #2a2a2a', color: '#555', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
-            <button onClick={saveNotes} disabled={savingNotes} style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: savingNotes ? 0.6 : 1 }}>
+            <button onClick={saveNotes} disabled={savingNotes} style={{ background: accent, border: 'none', color: '#000', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: savingNotes ? 0.6 : 1 }}>
               {savingNotes ? 'Saving…' : 'Save'}
             </button>
           </div>
@@ -818,7 +928,8 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
   onSetIdx: (idx: number | null) => void
   coverArtUrl: string | null
   onPlayStateChange: (playing: boolean) => void
-}>(function AudioPlayer({ tracks, activeIdx, onSetIdx, coverArtUrl, onPlayStateChange }, ref) {
+  accent: string
+}>(function AudioPlayer({ tracks, activeIdx, onSetIdx, coverArtUrl, onPlayStateChange, accent }, ref) {
   // Web Audio API refs
   const acRef       = useRef<AudioContext | null>(null)
   const gainRef     = useRef<GainNode | null>(null)
@@ -1077,11 +1188,11 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
     return (
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(8,8,8,0.97)', borderTop: '0.5px solid #1a1a1a', backdropFilter: 'blur(20px)', zIndex: 100, padding: '0 24px' }}>
         <div ref={progressRef} onClick={seekClick} style={{ height: 2, background: '#1a1a1a', cursor: 'pointer' }}>
-          <div style={{ width: `${pct}%`, height: '100%', background: '#C8FF00' }} />
+          <div style={{ width: `${pct}%`, height: '100%', background: accent }} />
         </div>
         <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, height: 44 }}>
           {coverArtUrl && <img src={coverArtUrl} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />}
-          <button onClick={togglePlay} style={{ background: 'transparent', border: 'none', color: '#C8FF00', cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}>
+          <button onClick={togglePlay} style={{ background: 'transparent', border: 'none', color: accent, cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}>
             {isPlaying
               ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
               : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>}
@@ -1092,7 +1203,7 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
           <span style={{ fontSize: 10, color: '#3a3a3a', flexShrink: 0 }}>{formatTime(currentTime)} / {formatTime(duration)}</span>
           <button onClick={() => setMinimized(false)} title="Expand player"
             style={{ background: 'transparent', border: '1px solid #2a2a2a', borderRadius: 5, color: '#555', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', flexShrink: 0, transition: 'border-color 0.15s, color 0.15s' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = '#C8FF00'; e.currentTarget.style.color = '#C8FF00' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = accent; e.currentTarget.style.color = accent }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = '#2a2a2a'; e.currentTarget.style.color = '#555' }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="18 15 12 9 6 15" /></svg>
           </button>
@@ -1127,7 +1238,7 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
             <button onClick={prev} style={pBtn}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="19 20 9 12 19 4 19 20" /><line x1="5" y1="19" x2="5" y2="5" /></svg>
             </button>
-            <button onClick={togglePlay} style={{ ...pBtn, width: 34, height: 34, background: '#C8FF00', border: 'none', color: '#000', borderRadius: '50%' }}>
+            <button onClick={togglePlay} style={{ ...pBtn, width: 34, height: 34, background: accent, border: 'none', color: '#000', borderRadius: '50%' }}>
               {isPlaying
                 ? <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
                 : <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>}
@@ -1139,7 +1250,7 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 480 }}>
             <span style={{ fontSize: 10, color: '#3a3a3a', width: 28, textAlign: 'right', flexShrink: 0 }}>{formatTime(currentTime)}</span>
             <div ref={progressRef} onClick={seekClick} style={{ flex: 1, height: 3, background: '#1e1e1e', borderRadius: 2, cursor: 'pointer' }}>
-              <div style={{ width: `${pct}%`, height: '100%', background: '#C8FF00', borderRadius: 2 }} />
+              <div style={{ width: `${pct}%`, height: '100%', background: accent, borderRadius: 2 }} />
             </div>
             <span style={{ fontSize: 10, color: '#3a3a3a', width: 28, flexShrink: 0 }}>{formatTime(duration)}</span>
           </div>
@@ -1149,10 +1260,10 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: 140, justifyContent: 'flex-end', flexShrink: 0 }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2e2e2e" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />{volume > 0 && <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />}</svg>
           <input type="range" min={0} max={1} step={0.01} value={volume} onChange={handleVolume}
-            style={{ width: 60, accentColor: '#C8FF00', cursor: 'pointer' }} />
+            style={{ width: 60, accentColor: accent, cursor: 'pointer' }} />
           <button onClick={() => setMinimized(true)} title="Minimize player"
             style={{ background: 'transparent', border: '1px solid #2a2a2a', borderRadius: 5, color: '#555', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', flexShrink: 0, transition: 'border-color 0.15s, color 0.15s' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = '#C8FF00'; e.currentTarget.style.color = '#C8FF00' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = accent; e.currentTarget.style.color = accent }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = '#2a2a2a'; e.currentTarget.style.color = '#555' }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
           </button>
@@ -1310,6 +1421,125 @@ function InspoLink({ item, onDelete }: { item: InspirationItem; onDelete: () => 
   )
 }
 
+/* ── Customize Panel ── */
+
+const BG_PRESETS    = ['#1A0533','#1A0505','#03061A','#011A0A','#1A0A00','#0D0D1A','#1A1410','#0A0A0A']
+const ACCENT_PRESETS = ['#C8FF00','#FF3B8B','#7B61FF','#00C2FF','#FF9500','#00E5A0','#FF6B35','#FFFFFF']
+
+function CustomizePanel({ theme, onThemeChange, hasCoverArt, onResetToPhoto, onClose }: {
+  theme: Theme
+  onThemeChange: (updates: Partial<Theme>) => void
+  hasCoverArt: boolean
+  onResetToPhoto: () => void
+  onClose: () => void
+}) {
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+  useEffect(() => {
+    function check() { setIsMobile(window.innerWidth < 768) }
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+
+  const panelStyle: React.CSSProperties = isMobile
+    ? { position: 'fixed', bottom: 0, left: 0, right: 0, maxHeight: '75vh', borderRadius: '16px 16px 0 0', background: '#0d0d0d', borderTop: '0.5px solid #2a2a2a', zIndex: 400, overflowY: 'auto', paddingBottom: 32 }
+    : { position: 'fixed', top: 0, right: 0, bottom: 0, width: 280, background: '#0d0d0d', borderLeft: '0.5px solid #1a1a1a', zIndex: 400, overflowY: 'auto', paddingBottom: 32 }
+
+  const slabel: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: '#444', letterSpacing: '1px', display: 'block', marginBottom: 10 }
+
+  function Dot({ color, selected, onClick }: { color: string; selected: boolean; onClick: () => void }) {
+    return (
+      <button onClick={onClick} title={color} style={{ width: 24, height: 24, borderRadius: '50%', background: color, border: selected ? '2px solid #fff' : '1.5px solid rgba(255,255,255,0.1)', cursor: 'pointer', padding: 0, transform: selected ? 'scale(1.2)' : 'scale(1)', transition: 'transform 0.1s', flexShrink: 0 }} />
+    )
+  }
+
+  const styleOptions: Array<{ key: Theme['bg_style']; label: string }> = [
+    { key: 'gradient', label: 'Gradient' },
+    { key: 'solid',    label: 'Solid' },
+    { key: 'stars',    label: 'Stars' },
+    { key: 'grain',    label: 'Grain' },
+  ]
+
+  const stylePreviews: Record<Theme['bg_style'], React.ReactNode> = {
+    gradient: <div style={{ background: 'radial-gradient(ellipse at 50% 0%, #555 0%, #111 100%)', borderRadius: 4, height: '100%' }} />,
+    solid:    <div style={{ background: '#555', borderRadius: 4, height: '100%' }} />,
+    stars: (
+      <div style={{ background: '#111', borderRadius: 4, height: '100%', position: 'relative', overflow: 'hidden' }}>
+        {[7,23,41,59,73,89,13,37,61,83,17,47].map((v, i) => (
+          <div key={i} style={{ position: 'absolute', width: 1.5, height: 1.5, borderRadius: '50%', background: '#666', left: `${v}%`, top: `${(v * 3 + i * 11) % 90 + 5}%` }} />
+        ))}
+      </div>
+    ),
+    grain: (
+      <div style={{ background: '#333', borderRadius: 4, height: '100%', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, opacity: 0.6 }}>
+          <filter id="cpgrain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" /><feColorMatrix type="saturate" values="0" /></filter>
+          <rect width="100%" height="100%" filter="url(#cpgrain)" />
+        </svg>
+      </div>
+    ),
+  }
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 399 }} />
+      <div style={panelStyle}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px 14px', borderBottom: '0.5px solid #1a1a1a', position: 'sticky', top: 0, background: '#0d0d0d', zIndex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+            <p style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Customize</p>
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#555', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: 0 }}>×</button>
+        </div>
+
+        <div style={{ padding: '20px 20px 0' }}>
+          {/* Background Color */}
+          <div style={{ marginBottom: 24 }}>
+            <label style={slabel}>BACKGROUND</label>
+            <input type="color" value={theme.bg_color}
+              onChange={e => onThemeChange({ bg_color: e.target.value, source: 'manual' })}
+              style={{ width: '100%', height: 38, borderRadius: 8, border: '0.5px solid #2a2a2a', background: 'transparent', cursor: 'pointer', padding: 2, marginBottom: 10, display: 'block' }} />
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {BG_PRESETS.map(c => <Dot key={c} color={c} selected={theme.bg_color === c} onClick={() => onThemeChange({ bg_color: c, source: 'manual' })} />)}
+            </div>
+            {hasCoverArt && (
+              <button onClick={onResetToPhoto} style={{ marginTop: 10, background: 'transparent', border: 'none', color: '#555', fontSize: 11, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
+                Reset to cover color
+              </button>
+            )}
+          </div>
+
+          {/* Accent Color */}
+          <div style={{ marginBottom: 24 }}>
+            <label style={slabel}>ACCENT</label>
+            <p style={{ fontSize: 11, color: '#444', marginBottom: 10 }}>Highlights, active states, and buttons</p>
+            <input type="color" value={theme.accent_color}
+              onChange={e => onThemeChange({ accent_color: e.target.value })}
+              style={{ width: '100%', height: 38, borderRadius: 8, border: '0.5px solid #2a2a2a', background: 'transparent', cursor: 'pointer', padding: 2, marginBottom: 10, display: 'block' }} />
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {ACCENT_PRESETS.map(c => <Dot key={c} color={c} selected={theme.accent_color === c} onClick={() => onThemeChange({ accent_color: c })} />)}
+            </div>
+          </div>
+
+          {/* Style */}
+          <div>
+            <label style={slabel}>STYLE</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {styleOptions.map(opt => (
+                <button key={opt.key} onClick={() => onThemeChange({ bg_style: opt.key })}
+                  style={{ background: '#111', border: `1.5px solid ${theme.bg_style === opt.key ? theme.accent_color : '#222'}`, borderRadius: 8, padding: 0, cursor: 'pointer', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ height: 52, padding: 6 }}>{stylePreviews[opt.key]}</div>
+                  <p style={{ fontSize: 11, fontWeight: 600, color: theme.bg_style === opt.key ? '#fff' : '#555', padding: '5px 0 8px', textAlign: 'center', margin: 0 }}>{opt.label}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
 /* ── Main Page ── */
 
 export function ProjectDetail() {
@@ -1327,10 +1557,25 @@ export function ProjectDetail() {
   const [showFeatures, setShowFeatures] = useState(true)
   const [converting, setConverting]   = useState(false)
   const [managingTrack, setManagingTrack] = useState<ProjectTrack | null>(null)
+  const [theme, setTheme]             = useState<Theme>(DEFAULT_THEME)
+  const [customizeOpen, setCustomizeOpen] = useState(false)
+  const [extractedColor, setExtractedColor] = useState<string | null>(null)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const dragFromRef  = useRef<number | null>(null)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
   const playerRef    = useRef<AudioPlayerHandle>(null)
+
+  function updateTheme(updates: Partial<Theme>) {
+    setTheme(prev => {
+      const next = { ...prev, ...updates }
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = setTimeout(async () => {
+        if (project) await supabase.from('projects').update({ theme: next }).eq('id', project.id)
+      }, 500)
+      return next
+    })
+  }
 
   useEffect(() => {
     if (!user || !id) return
@@ -1360,7 +1605,18 @@ export function ProjectDetail() {
         if (!byTrack[v.track_id]) byTrack[v.track_id] = []
         byTrack[v.track_id].push(v)
       }
-      setProject(pRes.data as Project)
+      const loaded = pRes.data as Project
+      setProject(loaded)
+      const t = loaded.theme
+      setTheme(t ? { ...DEFAULT_THEME, ...t } : DEFAULT_THEME)
+      if (loaded.cover_art_url && (!t || t.source === 'auto')) {
+        extractDominantColor(loaded.cover_art_url).then(color => {
+          setExtractedColor(color)
+          if (!t || t.source === 'auto') {
+            setTheme(prev => ({ ...prev, bg_color: color }))
+          }
+        })
+      }
       setTracks(rawTracks.map(t => ({ ...t, track_versions: byTrack[t.id] ?? [] } as ProjectTrack)))
       setLoading(false)
     }
@@ -1461,20 +1717,32 @@ export function ProjectDetail() {
     : null
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0A0A0A', paddingBottom: activeIdx !== null ? 90 : 0 }}>
-      <style>{`.proj-detail-grid { display: grid; grid-template-columns: 60fr 40fr; gap: 40px; align-items: start; } @media (max-width: 860px) { .proj-detail-grid { grid-template-columns: 1fr !important; } }`}</style>
+    <div style={{ minHeight: '100vh', background: getPageBackground(theme), paddingBottom: activeIdx !== null ? 90 : 0, position: 'relative', '--accent': theme.accent_color } as React.CSSProperties}>
+      {theme.bg_style === 'stars' && <StarsLayer bgColor={theme.bg_color} />}
+      {theme.bg_style === 'grain' && <GrainLayer />}
+      <style>{`
+        .proj-detail-grid { display: grid; grid-template-columns: 60fr 40fr; gap: 40px; align-items: start; }
+        @media (max-width: 860px) { .proj-detail-grid { grid-template-columns: 1fr !important; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
 
       {/* Top bar */}
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 32px', height: 60, borderBottom: '0.5px solid #1a1a1a', position: 'sticky', top: 0, background: '#0A0A0A', zIndex: 50 }}>
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 32px', height: 60, borderBottom: '0.5px solid #1a1a1a', position: 'sticky', top: 0, background: 'rgba(10,10,10,0.85)', backdropFilter: 'blur(20px)', zIndex: 50 }}>
         <button onClick={() => navigate('/app/projects')} style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
           Projects
         </button>
-        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '3px', color: '#C8FF00' }}>LABYL</span>
-        <button onClick={convertToRelease} disabled={converting || tracks.length === 0}
-          style={{ background: 'transparent', border: `1px solid ${tracks.length > 0 ? '#C8FF00' : '#222'}`, color: tracks.length > 0 ? '#C8FF00' : '#333', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: tracks.length > 0 ? 'pointer' : 'default', whiteSpace: 'nowrap', transition: 'all 0.15s' }}>
-          {converting ? 'Creating…' : 'Ready to drop? Start Rollout →'}
-        </button>
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '3px', color: theme.accent_color }}>LABYL</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button onClick={() => setCustomizeOpen(o => !o)} title="Customize"
+            style={{ background: customizeOpen ? accentAlpha(theme.accent_color, 0.12) : 'transparent', border: `1px solid ${customizeOpen ? theme.accent_color : '#2a2a2a'}`, borderRadius: 7, color: customizeOpen ? theme.accent_color : '#555', cursor: 'pointer', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, transition: 'all 0.15s' }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+          </button>
+          <button onClick={convertToRelease} disabled={converting || tracks.length === 0}
+            style={{ background: 'transparent', border: `1px solid ${tracks.length > 0 ? theme.accent_color : '#222'}`, color: tracks.length > 0 ? theme.accent_color : '#333', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: tracks.length > 0 ? 'pointer' : 'default', whiteSpace: 'nowrap', transition: 'all 0.15s' }}>
+            {converting ? 'Creating…' : 'Ready to drop? Start Rollout →'}
+          </button>
+        </div>
       </header>
 
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px 40px' }}>
@@ -1486,6 +1754,10 @@ export function ProjectDetail() {
             <CoverArtUpload
               project={project}
               onUpdate={url => setProject(p => p ? { ...p, cover_art_url: url } : p)}
+              onThemeExtracted={color => {
+                setExtractedColor(color)
+                updateTheme({ bg_color: color, source: 'auto' })
+              }}
             />
 
             {/* Album header */}
@@ -1507,7 +1779,7 @@ export function ProjectDetail() {
                     <button key={t} onClick={async () => {
                       await supabase.from('projects').update({ type: t }).eq('id', project.id)
                       setProject(p => p ? { ...p, type: t } : p)
-                    }} style={{ background: project.type === t ? 'rgba(200,255,0,0.08)' : 'transparent', border: `1px solid ${project.type === t ? '#C8FF00' : '#2a2a2a'}`, color: project.type === t ? '#C8FF00' : '#555', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
+                    }} style={{ background: project.type === t ? accentAlpha(theme.accent_color, 0.08) : 'transparent', border: `1px solid ${project.type === t ? theme.accent_color : '#2a2a2a'}`, color: project.type === t ? theme.accent_color : '#555', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
                       {t.charAt(0).toUpperCase() + t.slice(1)}
                     </button>
                   ))}
@@ -1522,11 +1794,11 @@ export function ProjectDetail() {
               </p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <button onClick={() => setShowFeatures(s => !s)} title={showFeatures ? 'Hide featured artists' : 'Show featured artists'}
-                  style={{ background: showFeatures ? 'rgba(200,255,0,0.08)' : 'transparent', border: `1px solid ${showFeatures ? 'rgba(200,255,0,0.3)' : '#222'}`, color: showFeatures ? '#C8FF00' : '#444', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
+                  style={{ background: showFeatures ? accentAlpha(theme.accent_color, 0.08) : 'transparent', border: `1px solid ${showFeatures ? accentAlpha(theme.accent_color, 0.3) : '#222'}`, color: showFeatures ? theme.accent_color : '#444', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
                   ft.
                 </button>
                 <button onClick={() => setShowAddTrack(true)}
-                  style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 7, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  style={{ background: theme.accent_color, border: 'none', color: '#000', borderRadius: 7, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                   + Add Track
                 </button>
               </div>
@@ -1550,6 +1822,7 @@ export function ProjectDetail() {
                     isActive={activeIdx === i}
                     isPlaying={activeIdx === i && isPlaying}
                     showFeatures={showFeatures}
+                    accent={theme.accent_color}
                     onPlay={() => handlePlayTrack(i)}
                     onDelete={() => deleteTrack(track)}
                     onUpdate={updated => setTracks(ts => ts.map(t => t.id === updated.id ? updated : t))}
@@ -1579,6 +1852,7 @@ export function ProjectDetail() {
         onSetIdx={handleSetIdx}
         coverArtUrl={project.cover_art_url}
         onPlayStateChange={setIsPlaying}
+        accent={theme.accent_color}
       />
 
       {/* Add Track Modal */}
@@ -1600,6 +1874,19 @@ export function ProjectDetail() {
             setTracks(ts => ts.map(t => t.id === updated.id ? updated : t))
             setManagingTrack(updated)
           }}
+        />
+      )}
+
+      {/* Customize Panel */}
+      {customizeOpen && (
+        <CustomizePanel
+          theme={theme}
+          onThemeChange={updateTheme}
+          hasCoverArt={!!project.cover_art_url}
+          onResetToPhoto={() => {
+            if (extractedColor) updateTheme({ bg_color: extractedColor, source: 'auto' })
+          }}
+          onClose={() => setCustomizeOpen(false)}
         />
       )}
     </div>

@@ -11,6 +11,11 @@ interface InspirationItem {
   created_at: string
 }
 
+interface ProjectTheme {
+  bg_color?: string
+  accent_color?: string
+}
+
 interface Project {
   id: string
   user_id: string
@@ -23,6 +28,7 @@ interface Project {
   created_at: string
   updated_at: string
   project_tracks: { id: string }[]
+  theme: ProjectTheme | null
 }
 
 /* ── Helpers ── */
@@ -33,9 +39,15 @@ function computeType(count: number, stored: string): string {
   return stored === 'mixtape' ? 'Mixtape' : 'Album'
 }
 
-function TypeBadge({ label }: { label: string }) {
+function TypeBadge({ label, accent }: { label: string; accent?: string }) {
   return (
-    <span style={{ fontSize: 10, fontWeight: 700, color: '#aaa', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4, padding: '2px 7px', letterSpacing: '0.5px' }}>
+    <span style={{
+      fontSize: 10, fontWeight: 700,
+      color: accent ? '#000' : '#aaa',
+      background: accent ? accent : 'rgba(0,0,0,0.5)',
+      border: accent ? 'none' : '1px solid rgba(255,255,255,0.12)',
+      borderRadius: 4, padding: '2px 7px', letterSpacing: '0.5px'
+    }}>
       {label}
     </span>
   )
@@ -156,7 +168,7 @@ function ProjectCard({ project, onClick, onDelete }: {
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.75) 60%, rgba(0,0,0,0.95) 100%)' }} />
         </>
       ) : (
-        <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(#181818 1px, transparent 1px), linear-gradient(90deg, #181818 1px, transparent 1px)', backgroundSize: '24px 24px', backgroundColor: '#0d0d0d' }} />
+        <div style={{ position: 'absolute', inset: 0, background: project.theme?.bg_color ?? '#0d0d0d', backgroundImage: 'linear-gradient(#181818 1px, transparent 1px), linear-gradient(90deg, #181818 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
       )}
 
       {/* Released badge */}
@@ -180,7 +192,7 @@ function ProjectCard({ project, onClick, onDelete }: {
 
       {/* Content */}
       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px 16px 14px' }}>
-        <div style={{ marginBottom: 6 }}><TypeBadge label={typeLabel} /></div>
+        <div style={{ marginBottom: 6 }}><TypeBadge label={typeLabel} accent={project.theme?.accent_color} /></div>
         <p style={{ fontSize: 15, fontWeight: 700, color: '#fff', letterSpacing: '-0.2px', marginBottom: 4, lineHeight: 1.2 }}>{project.name}</p>
         <p style={{ fontSize: 11, color: '#666' }}>
           {trackCount === 0 ? 'No tracks yet' : `${trackCount} track${trackCount !== 1 ? 's' : ''}`}
