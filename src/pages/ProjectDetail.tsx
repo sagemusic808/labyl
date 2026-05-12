@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -601,11 +601,12 @@ const inp: React.CSSProperties = { background: '#0f0f0f', border: '1px solid #22
 
 /* ── Track Row ── */
 
-function TrackRow({ track, index, isActive, isPlaying, onPlay, onDelete, onUpdate, onManageVersions, dragHandlers }: {
+function TrackRow({ track, index, isActive, isPlaying, showFeatures, onPlay, onDelete, onUpdate, onManageVersions, dragHandlers }: {
   track: ProjectTrack
   index: number
   isActive: boolean
   isPlaying: boolean
+  showFeatures: boolean
   onPlay: () => void
   onDelete: () => void
   onUpdate: (t: ProjectTrack) => void
@@ -617,12 +618,14 @@ function TrackRow({ track, index, isActive, isPlaying, onPlay, onDelete, onUpdat
     isDragOver: boolean
   }
 }) {
-  const [notesOpen, setNotesOpen] = useState(false)
-  const [editNotes, setEditNotes]   = useState(track.notes ?? '')
-  const [savingNotes, setSavingNotes] = useState(false)
-  const [menuOpen, setMenuOpen]     = useState(false)
+  const [notesOpen, setNotesOpen]       = useState(false)
+  const [editNotes, setEditNotes]       = useState(track.notes ?? '')
+  const [savingNotes, setSavingNotes]   = useState(false)
+  const [menuOpen, setMenuOpen]         = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
-  const [editTitle, setEditTitle]   = useState(track.title)
+  const [editTitle, setEditTitle]       = useState(track.title)
+  const [editingFeatures, setEditingFeatures] = useState(false)
+  const [editFeatures, setEditFeatures] = useState<string[]>(track.features ?? [])
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -651,9 +654,16 @@ function TrackRow({ track, index, isActive, isPlaying, onPlay, onDelete, onUpdat
     setEditingTitle(false)
   }
 
+  async function saveFeatures() {
+    await supabase.from('project_tracks').update({ features: editFeatures }).eq('id', track.id)
+    onUpdate({ ...track, features: editFeatures })
+    setEditingFeatures(false)
+  }
+
   const activeVersion = getActiveVersion(track)
-  const displayTitle  = formatTrackTitle(track.title, track.features ?? [])
+  const displayTitle  = showFeatures ? formatTrackTitle(track.title, track.features ?? []) : track.title
   const hasNotes      = !!track.notes
+  const hasFeatures   = (track.features ?? []).length > 0
   const versionCount  = track.track_versions?.length ?? 0
 
   return (
@@ -733,13 +743,26 @@ function TrackRow({ track, index, isActive, isPlaying, onPlay, onDelete, onUpdat
           {menuOpen && (
             <div style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, background: '#111', border: '0.5px solid #1e1e1e', borderRadius: 8, padding: 4, minWidth: 160, boxShadow: '0 8px 24px rgba(0,0,0,0.8)', zIndex: 50 }}>
               <button onClick={() => { setEditingTitle(true); setMenuOpen(false) }} style={mitem}>Edit title</button>
+              <button onClick={() => { setEditFeatures(track.features ?? []); setEditingFeatures(true); setMenuOpen(false) }} style={mitem}>{hasFeatures ? 'Edit features' : 'Add features'}</button>
               <button onClick={() => { setEditNotes(track.notes ?? ''); setNotesOpen(true); setMenuOpen(false) }} style={mitem}>{hasNotes ? 'Edit notes' : 'Add notes'}</button>
-              <button onClick={() => { onManageVersions(); setMenuOpen(false) }} style={mitem}>Manage Versions {versionCount > 1 ? `(${versionCount})` : ''}</button>
+              <button onClick={() => { onManageVersions(); setMenuOpen(false) }} style={mitem}>Manage versions {versionCount > 1 ? `(${versionCount})` : ''}</button>
               <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...mitem, color: '#FF3B3B' }}>Remove from project</button>
             </div>
           )}
         </div>
       </div>
+
+      {/* Inline features editor */}
+      {editingFeatures && (
+        <div style={{ margin: '4px 0 8px 50px', background: '#0d0d0d', border: '0.5px solid #1a1a1a', borderRadius: 8, padding: 14 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: '#444', letterSpacing: '0.8px', marginBottom: 8 }}>FEATURED ARTISTS</p>
+          <TagInput tags={editFeatures} onChange={setEditFeatures} />
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+            <button onClick={() => { setEditingFeatures(false); setEditFeatures(track.features ?? []) }} style={{ background: 'transparent', border: '1px solid #2a2a2a', color: '#555', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+            <button onClick={saveFeatures} style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Save</button>
+          </div>
+        </div>
+      )}
 
       {/* Inline notes */}
       {notesOpen && (
@@ -761,11 +784,15 @@ const mitem: React.CSSProperties = { display: 'block', width: '100%', textAlign:
 
 /* ── Audio Player (Web Audio API — gapless) ── */
 
-function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
+interface AudioPlayerHandle { toggle: () => void }
+
+const AudioPlayer = forwardRef<AudioPlayerHandle, {
   tracks: ProjectTrack[]
   activeIdx: number | null
   onSetIdx: (idx: number | null) => void
-}) {
+  coverArtUrl: string | null
+  onPlayStateChange: (playing: boolean) => void
+}>(function AudioPlayer({ tracks, activeIdx, onSetIdx, coverArtUrl, onPlayStateChange }, ref) {
   // Web Audio API refs
   const acRef       = useRef<AudioContext | null>(null)
   const gainRef     = useRef<GainNode | null>(null)
@@ -960,6 +987,9 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
     acRef.current?.close()
   }, []) // eslint-disable-line
 
+  // ── Sync isPlaying to parent (for track row buttons) ──
+  useEffect(() => { onPlayStateChange(isPlaying) }, [isPlaying]) // eslint-disable-line
+
   // ── Controls ──
   function togglePlay() {
     const ac = acRef.current
@@ -974,6 +1004,9 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
       setIsPlaying(true)
     }
   }
+
+  // Expose toggle to parent via ref
+  useImperativeHandle(ref, () => ({ toggle: togglePlay })) // eslint-disable-line
 
   function prev() {
     if (activeIdx === null) return
@@ -1013,6 +1046,7 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
           <div style={{ width: `${pct}%`, height: '100%', background: '#C8FF00' }} />
         </div>
         <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, height: 44 }}>
+          {coverArtUrl && <img src={coverArtUrl} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />}
           <button onClick={togglePlay} style={{ background: 'transparent', border: 'none', color: '#C8FF00', cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}>
             {isPlaying
               ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
@@ -1039,8 +1073,11 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
       <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 20 }}>
         {/* Track info */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: 190, flexShrink: 0, minWidth: 0 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 5, background: '#1a1a1a', border: '0.5px solid #222', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2a2a2a" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+          <div style={{ width: 34, height: 34, borderRadius: 5, background: '#1a1a1a', border: '0.5px solid #222', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {coverArtUrl
+              ? <img src={coverArtUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2a2a2a" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+            }
           </div>
           <div style={{ minWidth: 0 }}>
             <p style={{ fontSize: 12, fontWeight: 600, color: buffering ? '#666' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1089,7 +1126,7 @@ function AudioPlayer({ tracks, activeIdx, onSetIdx }: {
       </div>
     </div>
   )
-}
+}) // end forwardRef
 const pBtn: React.CSSProperties = { background: 'transparent', border: '1px solid #1e1e1e', borderRadius: '50%', width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#666', transition: 'border-color 0.15s' }
 
 /* ── Inspiration Board ── */
@@ -1253,11 +1290,13 @@ export function ProjectDetail() {
   const [showAddTrack, setShowAddTrack] = useState(false)
   const [activeIdx, setActiveIdx]     = useState<number | null>(null)
   const [isPlaying, setIsPlaying]     = useState(false)
+  const [showFeatures, setShowFeatures] = useState(true)
   const [converting, setConverting]   = useState(false)
   const [managingTrack, setManagingTrack] = useState<ProjectTrack | null>(null)
 
   const dragFromRef  = useRef<number | null>(null)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
+  const playerRef    = useRef<AudioPlayerHandle>(null)
 
   useEffect(() => {
     if (!user || !id) return
@@ -1358,10 +1397,10 @@ export function ProjectDetail() {
     navigate(`/app/rollout/new${params}`)
   }
 
-  function handleSetIdx(idx: number | null) { setActiveIdx(idx); setIsPlaying(idx !== null) }
+  function handleSetIdx(idx: number | null) { setActiveIdx(idx) }
   function handlePlayTrack(idx: number) {
-    if (activeIdx === idx) setIsPlaying(p => !p)
-    else { setActiveIdx(idx); setIsPlaying(true) }
+    if (activeIdx === idx) playerRef.current?.toggle()
+    else setActiveIdx(idx)
   }
 
   if (loading) return (
@@ -1444,10 +1483,16 @@ export function ProjectDetail() {
               <p style={{ fontSize: 10, fontWeight: 700, color: '#333', letterSpacing: '1.5px' }}>
                 TRACKLIST · {tracks.length} {tracks.length === 1 ? 'TRACK' : 'TRACKS'}
               </p>
-              <button onClick={() => setShowAddTrack(true)}
-                style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 7, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                + Add Track
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button onClick={() => setShowFeatures(s => !s)} title={showFeatures ? 'Hide featured artists' : 'Show featured artists'}
+                  style={{ background: showFeatures ? 'rgba(200,255,0,0.08)' : 'transparent', border: `1px solid ${showFeatures ? 'rgba(200,255,0,0.3)' : '#222'}`, color: showFeatures ? '#C8FF00' : '#444', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
+                  ft.
+                </button>
+                <button onClick={() => setShowAddTrack(true)}
+                  style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 7, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  + Add Track
+                </button>
+              </div>
             </div>
 
             {/* Tracks */}
@@ -1467,6 +1512,7 @@ export function ProjectDetail() {
                     index={i}
                     isActive={activeIdx === i}
                     isPlaying={activeIdx === i && isPlaying}
+                    showFeatures={showFeatures}
                     onPlay={() => handlePlayTrack(i)}
                     onDelete={() => deleteTrack(track)}
                     onUpdate={updated => setTracks(ts => ts.map(t => t.id === updated.id ? updated : t))}
@@ -1489,7 +1535,14 @@ export function ProjectDetail() {
       </main>
 
       {/* Audio Player */}
-      <AudioPlayer tracks={tracks} activeIdx={activeIdx} onSetIdx={handleSetIdx} />
+      <AudioPlayer
+        ref={playerRef}
+        tracks={tracks}
+        activeIdx={activeIdx}
+        onSetIdx={handleSetIdx}
+        coverArtUrl={project.cover_art_url}
+        onPlayStateChange={setIsPlaying}
+      />
 
       {/* Add Track Modal */}
       {showAddTrack && user && (
