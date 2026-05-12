@@ -5,6 +5,8 @@ import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
 import { Onboarding } from './pages/Onboarding'
 import { Dashboard } from './pages/Dashboard'
+import { Projects } from './pages/Projects'
+import { ProjectDetail } from './pages/ProjectDetail'
 import { Releases } from './pages/Releases'
 import { ReleaseDetail } from './pages/ReleaseDetail'
 import { RolloutNew } from './pages/RolloutNew'
@@ -36,6 +38,22 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/projects"
+            element={
+              <ProtectedRoute>
+                <Projects />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/projects/:id"
+            element={
+              <ProtectedRoute>
+                <ProjectDetail />
               </ProtectedRoute>
             }
           />

@@ -68,8 +68,9 @@ export function Dashboard() {
           <span style={styles.navLabelName}>{label?.name ?? 'Your Label'}</span>
         </div>
 
-        <nav style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button onClick={() => navigate('/app/dashboard')} style={{ background: 'transparent', border: 'none', color: '#FFFFFF', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: '6px 12px', borderRadius: 7 }}>HQ</button>
+        <nav style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <button style={{ background: 'rgba(200,255,0,0.08)', border: 'none', color: '#C8FF00', fontSize: 13, fontWeight: 600, cursor: 'default', padding: '6px 12px', borderRadius: 7 }}>HQ</button>
+          <button onClick={() => navigate('/app/projects')} style={{ background: 'transparent', border: 'none', color: '#555555', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '6px 12px', borderRadius: 7 }}>Projects</button>
           <button onClick={() => navigate('/app/releases')} style={{ background: 'transparent', border: 'none', color: '#555555', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '6px 12px', borderRadius: 7 }}>Catalog</button>
         </nav>
 

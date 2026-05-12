@@ -441,11 +441,14 @@ export function Releases() {
 
       {/* Top bar */}
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 32px', height: 60, borderBottom: '0.5px solid #1a1a1a', position: 'sticky', top: 0, background: '#0A0A0A', zIndex: 50 }}>
-        <button onClick={() => navigate('/app/dashboard')} style={{ background: 'transparent', border: 'none', color: '#666666', cursor: 'pointer', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
-          HQ
-        </button>
-        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '3px', color: '#C8FF00' }}>LABYL</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '3px', color: '#C8FF00' }}>LABYL</span>
+          <nav style={{ display: 'flex', gap: 2 }}>
+            <button onClick={() => navigate('/app/dashboard')} style={{ background: 'transparent', border: 'none', color: '#555', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '5px 10px', borderRadius: 6 }}>HQ</button>
+            <button onClick={() => navigate('/app/projects')} style={{ background: 'transparent', border: 'none', color: '#555', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '5px 10px', borderRadius: 6 }}>Projects</button>
+            <button style={{ background: 'rgba(200,255,0,0.08)', border: 'none', color: '#C8FF00', fontSize: 13, fontWeight: 600, cursor: 'default', padding: '5px 10px', borderRadius: 6 }}>Catalog</button>
+          </nav>
+        </div>
         <div style={{ width: 60 }} />
       </header>
 
