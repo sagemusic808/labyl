@@ -380,7 +380,7 @@ function CoverArtUpload({ project, onUpdate, onThemeExtracted }: {
   return (
     <div style={{ marginBottom: 24 }}>
       <div
-        style={{ width: 220, height: 220, borderRadius: 14, overflow: 'hidden', position: 'relative', background: '#111', border: '0.5px solid #1e1e1e', boxShadow: '0 16px 48px rgba(0,0,0,0.6)', cursor: project.cover_art_url ? 'default' : 'pointer', flexShrink: 0 }}
+        style={{ width: 280, height: 280, borderRadius: 14, overflow: 'hidden', position: 'relative', background: '#111', border: '0.5px solid #1e1e1e', boxShadow: '0 16px 48px rgba(0,0,0,0.6)', cursor: project.cover_art_url ? 'default' : 'pointer', flexShrink: 0 }}
         onClick={() => !project.cover_art_url && fileRef.current?.click()}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -812,8 +812,8 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, accent, onP
         onDragEnd={dragHandlers.onDrop}
         style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-          background: isActive ? accentAlpha(accent, 0.04) : dragHandlers.isDragOver ? 'rgba(255,255,255,0.02)' : 'transparent',
-          borderRadius: 8, border: `0.5px solid ${dragHandlers.isDragOver ? '#2a2a2a' : isActive ? accentAlpha(accent, 0.15) : 'transparent'}`,
+          background: dragHandlers.isDragOver ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.3)',
+          borderRadius: 8, border: `0.5px solid ${dragHandlers.isDragOver ? '#333' : isActive ? accentAlpha(accent, 0.4) : 'rgba(255,255,255,0.04)'}`,
           transition: 'all 0.1s ease',
         }}
       >
@@ -827,7 +827,7 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, accent, onP
         </div>
 
         {/* Number */}
-        <span style={{ fontSize: 11, color: isActive ? accent : '#3a3a3a', fontWeight: 600, width: 18, textAlign: 'right', flexShrink: 0 }}>{index + 1}</span>
+        <span style={{ fontSize: 11, color: isActive ? accent : '#fff', fontWeight: 500, width: 18, textAlign: 'right', flexShrink: 0 }}>{index + 1}</span>
 
         {/* Info */}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -840,13 +840,13 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, accent, onP
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
             {activeVersion && (
-              <span style={{ fontSize: 10, color: '#3a3a3a', fontWeight: 500 }}>{activeVersion.version_name}</span>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', fontWeight: 500 }}>{activeVersion.version_name}</span>
             )}
             {versionCount > 1 && (
-              <span style={{ fontSize: 10, color: '#2e2e2e' }}>· {versionCount} versions</span>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>· {versionCount} versions</span>
             )}
             {track.duration_seconds != null && (
-              <span style={{ fontSize: 10, color: '#3a3a3a' }}>{formatDur(track.duration_seconds)}</span>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>{formatDur(track.duration_seconds)}</span>
             )}
           </div>
         </div>
@@ -862,10 +862,12 @@ function TrackRow({ track, index, isActive, isPlaying, showFeatures, accent, onP
 
         {/* Play */}
         <button onClick={onPlay}
-          style={{ background: isActive && isPlaying ? accentAlpha(accent, 0.12) : 'transparent', border: `1px solid ${isActive ? accent : '#222'}`, borderRadius: '50%', width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s' }}>
+          style={{ background: 'rgba(255,255,255,0.92)', border: 'none', borderRadius: '50%', width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, transition: 'background 0.15s', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }}
+          onMouseEnter={e => (e.currentTarget.style.background = '#fff')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.92)')}>
           {isActive && isPlaying
-            ? <svg width="10" height="10" viewBox="0 0 24 24" fill={accent}><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
-            : <svg width="10" height="10" viewBox="0 0 24 24" fill={isActive ? accent : '#555'}><polygon points="5 3 19 12 5 21 5 3" /></svg>
+            ? <svg width="10" height="10" viewBox="0 0 24 24" fill="#111"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+            : <svg width="10" height="10" viewBox="0 0 24 24" fill="#111"><polygon points="5 3 19 12 5 21 5 3" /></svg>
           }
         </button>
 
@@ -1723,7 +1725,13 @@ export function ProjectDetail() {
       <style>{`
         .proj-detail-grid { display: grid; grid-template-columns: 60fr 40fr; gap: 40px; align-items: start; }
         @media (max-width: 860px) { .proj-detail-grid { grid-template-columns: 1fr !important; } }
+        @media (max-width: 860px) { .inspo-scroll { position: static !important; height: auto !important; overflow: visible !important; } }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .inspo-scroll { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent; }
+        .inspo-scroll::-webkit-scrollbar { width: 4px; }
+        .inspo-scroll::-webkit-scrollbar-track { background: transparent; }
+        .inspo-scroll::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 4px; }
+        .inspo-scroll::-webkit-scrollbar-thumb:hover { background: ${theme.accent_color}; }
       `}</style>
 
       {/* Top bar */}
@@ -1834,8 +1842,8 @@ export function ProjectDetail() {
             )}
           </div>
 
-          {/* RIGHT — Inspiration Board */}
-          <div style={{ position: 'sticky', top: 76 }}>
+          {/* RIGHT — Inspiration Board (independently scrollable) */}
+          <div style={{ position: 'sticky', top: 76, height: 'calc(100vh - 76px)', overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 }} className="inspo-scroll">
             <InspirationBoard
               project={project}
               onUpdate={items => setProject(p => p ? { ...p, inspiration_items: items } : p)}
