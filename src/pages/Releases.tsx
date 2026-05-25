@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { Wordmark } from '../components/Logo'
 import type { Label, Release } from '../types'
 
 const RELEASE_TYPES = ['Single', 'EP', 'Album', 'Mixtape']
@@ -442,7 +443,7 @@ export function Releases() {
       {/* Top bar */}
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 32px', height: 60, borderBottom: '0.5px solid #1a1a1a', position: 'sticky', top: 0, background: '#0A0A0A', zIndex: 50 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '3px', color: '#C8FF00' }}>LABYL</span>
+          <Wordmark height={20} />
           <nav style={{ display: 'flex', gap: 2 }}>
             <button onClick={() => navigate('/app/dashboard')} style={{ background: 'transparent', border: 'none', color: '#555', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '5px 10px', borderRadius: 6 }}>HQ</button>
             <button onClick={() => navigate('/app/projects')} style={{ background: 'transparent', border: 'none', color: '#555', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '5px 10px', borderRadius: 6 }}>Projects</button>

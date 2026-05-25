@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { Wordmark } from '../components/Logo'
 
 /* ── Types ── */
 
@@ -1936,7 +1937,7 @@ export function ProjectDetail() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
           Projects
         </button>
-        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '3px', color: theme.accent_color }}>LABYL</span>
+        <Wordmark height={20} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={() => setCustomizeOpen(o => !o)} title="Customize"
             style={{ background: customizeOpen ? accentAlpha(theme.accent_color, 0.12) : 'transparent', border: `1px solid ${customizeOpen ? theme.accent_color : '#2a2a2a'}`, borderRadius: 7, color: customizeOpen ? theme.accent_color : '#555', cursor: 'pointer', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, transition: 'all 0.15s' }}>

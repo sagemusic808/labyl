@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { IconMark } from '../components/Logo'
 
 export function Login() {
   const navigate = useNavigate()
@@ -36,7 +37,9 @@ export function Login() {
   return (
     <div style={styles.page}>
       <div style={styles.card} className="animate-fade-in">
-        <div style={styles.logo}>LABYL</div>
+        <Link to="/" style={{ display: 'flex', justifyContent: 'center', marginBottom: 32 }}>
+          <IconMark size={48} rx={14} />
+        </Link>
         <h1 style={styles.title}>Welcome back</h1>
         <p style={styles.subtitle}>Sign in to your label</p>
 

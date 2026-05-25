@@ -6,6 +6,7 @@ import { ChatDrawer } from '../components/ChatDrawer'
 import { AGENTS } from '../lib/agents'
 import type { Agent } from '../lib/agents'
 import type { Label } from '../types'
+import { Wordmark, IconMark } from '../components/Logo'
 
 interface Rollout {
   id: string
@@ -107,10 +108,21 @@ export function Dashboard() {
           0%, 100% { box-shadow: 0 0 0 0 rgba(200,255,0,0.6); }
           50% { box-shadow: 0 0 12px 4px rgba(200,255,0,0.3); }
         }
+        .db-wordmark { display: flex; align-items: center; }
+        .db-iconmark { display: none; }
+        @media (max-width: 768px) {
+          .db-wordmark { display: none !important; }
+          .db-iconmark { display: flex !important; align-items: center; }
+        }
       `}</style>
       {/* ── Top nav ── */}
       <header style={styles.nav}>
         <div style={styles.navLeft}>
+          {/* Labyl brand mark */}
+          <span className="db-wordmark"><Wordmark height={22} /></span>
+          <span className="db-iconmark"><IconMark size={28} rx={8} /></span>
+          {/* Divider + label identity */}
+          <span style={{ width: 1, height: 18, background: '#2a2a2a', margin: '0 12px', flexShrink: 0 }} />
           <NavLogo label={label} />
           <span style={styles.navLabelName}>{label?.name ?? 'Your Label'}</span>
         </div>

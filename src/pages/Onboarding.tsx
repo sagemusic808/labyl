@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { AGENTS } from '../lib/agents'
+import { Wordmark } from '../components/Logo'
 
 const GENRES = ['Hip-Hop', 'R&B', 'Pop', 'Afrobeats', 'Drill', 'Lo-Fi', 'Indie', 'Electronic', 'Trap', 'Soul', 'Jazz', 'Latin', 'Other']
 
@@ -230,14 +231,13 @@ export function Onboarding() {
               exit="exit"
               transition={{ duration: 0.6 }}
             >
-              <motion.p
-                style={styles.logoMark}
+              <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.8, ease: 'easeOut' }}
               >
-                LABYL
-              </motion.p>
+                <Wordmark width={200} />
+              </motion.div>
               <motion.p
                 style={styles.introTagline}
                 initial={{ opacity: 0 }}

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { AGENTS } from '../lib/agents'
+import { Wordmark, IconMark } from '../components/Logo'
 
 type WaitlistStatus = 'idle' | 'loading' | 'success' | 'duplicate' | 'error'
 
@@ -98,7 +99,11 @@ export function Landing() {
         }
         * { box-sizing: border-box; }
 
+        .l-logo-mobile { display: none; }
+        .l-logo-desktop { display: flex; align-items: center; }
         @media (max-width: 768px) {
+          .l-logo-desktop { display: none !important; }
+          .l-logo-mobile { display: flex !important; align-items: center; }
           .l-nav { padding: 18px 20px !important; }
           .l-headline { font-size: 36px !important; letter-spacing: -1px !important; }
           .l-section { padding: 60px 20px !important; }
@@ -133,7 +138,9 @@ export function Landing() {
 
       {/* Nav */}
       <nav style={styles.nav} className="l-nav">
-        <span style={styles.navLogo}>LABYL</span>
+        {/* Desktop: full wordmark · Mobile: icon only */}
+        <span className="l-logo-desktop"><Wordmark height={32} /></span>
+        <span className="l-logo-mobile"><IconMark size={28} rx={8} /></span>
         <Link to="/app/login" style={styles.navLink}>Sign in →</Link>
       </nav>
 

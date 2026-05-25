@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { Wordmark } from '../components/Logo'
 
 const GENRES = ['Hip-Hop', 'R&B', 'Pop', 'Afrobeats', 'Drill', 'Lo-Fi', 'Indie', 'Electronic', 'Other']
 
@@ -125,8 +126,8 @@ export function Settings() {
           Back
         </button>
         <div>
-          <h1 style={styles.pageTitle}>Settings</h1>
-          <p style={styles.pageSubtitle}>Manage your label and profile</p>
+          <Wordmark width={120} />
+          <p style={styles.pageSubtitle}>Settings</p>
         </div>
       </header>
 

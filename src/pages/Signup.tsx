@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { IconMark } from '../components/Logo'
 
 export function Signup() {
   const navigate = useNavigate()
@@ -38,7 +39,9 @@ export function Signup() {
     return (
       <div style={styles.page}>
         <div style={styles.card} className="animate-fade-in">
-          <div style={styles.logo}>LABYL</div>
+          <Link to="/" style={{ display: 'flex', justifyContent: 'center', marginBottom: 32 }}>
+            <IconMark size={48} rx={14} />
+          </Link>
           <h1 style={styles.title}>Check your email</h1>
           <p style={styles.subtitle}>
             We sent a confirmation link to <strong style={{ color: '#fff' }}>{email}</strong>.
