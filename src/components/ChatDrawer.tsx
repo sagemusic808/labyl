@@ -75,8 +75,18 @@ export function ChatDrawer({ agent, label, onClose, initialPrompt }: ChatDrawerP
     setLoading(true)
 
     try {
-      const { data, error } = await supabase.functions.invoke('chat', {
-        body: {
+      const { data: { session } } = await supabase.auth.getSession()
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token ?? anonKey}`,
+          'apikey': anonKey,
+        },
+        body: JSON.stringify({
           messages: updated.map(m => ({ role: m.role, content: m.content })),
           agentType: agent.type,
           labelName: label.name,
@@ -84,19 +94,34 @@ export function ChatDrawer({ agent, label, onClose, initialPrompt }: ChatDrawerP
           artistName: label.artist_name ?? '',
           careerStage: label.career_stage ?? '',
           longTermGoals: label.long_term_goals ?? [],
-        },
+        }),
       })
 
-      if (error) throw error
+      if (!res.ok) throw new Error(`Chat failed: ${res.status}`)
+      if (!res.body) throw new Error('No response body')
 
-      const assistantMsg: ChatMessage = {
-        role: 'assistant',
-        content: data.content ?? 'Something went wrong. Please try again.',
+      // Add an empty assistant bubble — tokens will fill it in
+      setMessages(prev => [...prev, { role: 'assistant', content: '' }])
+      setLoading(false) // hide typing dots; streaming text is the indicator now
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulated = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        accumulated += decoder.decode(value, { stream: true })
+        // Update the last message in place as each chunk arrives
+        setMessages(prev => {
+          const arr = [...prev]
+          arr[arr.length - 1] = { role: 'assistant', content: accumulated }
+          return arr
+        })
       }
-      const final = [...updated, assistantMsg]
-      setMessages(final)
 
-      // Persist conversation — user_id must be included for conflict resolution
+      // Persist the full conversation once streaming is done
+      const final = [...updated, { role: 'assistant' as const, content: accumulated }]
       await supabase.from('ai_conversations').upsert(
         {
           user_id: user?.id,

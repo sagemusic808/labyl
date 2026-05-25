@@ -70,7 +70,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json()
     const client = new Anthropic({ apiKey: Deno.env.get('ANTHROPIC_API_KEY') })
 
-    // ── Rollout plan mode ──────────────────────────────────────────────────────
+    // ── Rollout plan mode (non-streaming, needs full JSON) ─────────────────────
     if (body.mode === 'rollout') {
       const systemPrompt = buildRolloutPrompt(body)
       const response = await client.messages.create({
@@ -88,7 +88,7 @@ Deno.serve(async (req: Request) => {
       })
     }
 
-    // ── Normal chat mode ───────────────────────────────────────────────────────
+    // ── Normal chat mode (streaming) ───────────────────────────────────────────
     const { messages, agentType, labelName, genres, artistName, careerStage, longTermGoals } = body
 
     const template = SYSTEM_PROMPTS[agentType]
@@ -109,17 +109,74 @@ Deno.serve(async (req: Request) => {
       .replace(/\{genres\}/g, Array.isArray(genres) ? genres.join(', ') : 'your genre')
       .replace(/\{artistName\}/g, artistName ?? 'the artist') + artistContext
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
-      system: systemPrompt,
-      messages,
+    // Hit Anthropic directly with stream:true and pipe SSE → raw text chunks
+    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': Deno.env.get('ANTHROPIC_API_KEY') ?? '',
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        stream: true,
+        system: systemPrompt,
+        messages,
+      }),
     })
 
-    const content = response.content[0].type === 'text' ? response.content[0].text : ''
+    if (!anthropicRes.ok) {
+      const err = await anthropicRes.text()
+      throw new Error(`Anthropic error: ${err}`)
+    }
 
-    return new Response(JSON.stringify({ content }), {
-      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    // Parse the SSE stream and emit only the raw text delta strings
+    const readable = new ReadableStream({
+      async start(controller) {
+        const reader = anthropicRes.body!.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() ?? ''
+
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
+              const data = line.slice(6).trim()
+              if (!data || data === '[DONE]') continue
+              try {
+                const event = JSON.parse(data)
+                if (
+                  event.type === 'content_block_delta' &&
+                  event.delta?.type === 'text_delta' &&
+                  event.delta.text
+                ) {
+                  controller.enqueue(new TextEncoder().encode(event.delta.text))
+                }
+              } catch {
+                // ignore malformed SSE lines
+              }
+            }
+          }
+        } finally {
+          controller.close()
+        }
+      },
+    })
+
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+        ...corsHeaders,
+      },
     })
   } catch (err) {
     console.error(err)
