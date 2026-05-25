@@ -236,7 +236,7 @@ export function RolloutView() {
   const displayGoals = isEditing ? editedGoals : (rollout?.goals ?? [])
 
   const todayDate = new Date().toISOString().split('T')[0]
-  const isLive = !!rollout.drop_date && rollout.drop_date <= todayDate
+  const isLive = !!rollout?.drop_date && rollout.drop_date <= todayDate
 
   const formattedDate = displayDropDate
     ? new Date(displayDropDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
