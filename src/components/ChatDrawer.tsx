@@ -240,7 +240,11 @@ export function ChatDrawer({ agent, label, onClose, initialPrompt }: ChatDrawerP
                       {msg.role === 'assistant' && (
                         <span style={{ ...styles.bubbleDot, background: agent.color }} />
                       )}
-                      <p style={styles.messageText}>{msg.content}</p>
+                      <div style={styles.messageText}>
+                        {msg.role === 'assistant'
+                          ? <MarkdownText text={msg.content} />
+                          : msg.content}
+                      </div>
                     </div>
                   ))}
                   {loading && (
@@ -291,6 +295,72 @@ export function ChatDrawer({ agent, label, onClose, initialPrompt }: ChatDrawerP
           </>
         )}
       </div>
+    </>
+  )
+}
+
+/** Renders the subset of markdown Claude actually uses in chat responses */
+function MarkdownText({ text }: { text: string }) {
+  const lines = text.split('\n')
+
+  return (
+    <>
+      {lines.map((line, li) => {
+        // Bullet list item
+        const bullet = line.match(/^(\s*[-*])\s+(.*)/)
+        if (bullet) {
+          return (
+            <p key={li} style={{ margin: '2px 0', paddingLeft: 12, position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 0, color: '#C8FF00' }}>·</span>
+              <InlineMarkdown text={bullet[2]} />
+            </p>
+          )
+        }
+
+        // Numbered list item
+        const numbered = line.match(/^(\d+)\.\s+(.*)/)
+        if (numbered) {
+          return (
+            <p key={li} style={{ margin: '2px 0', paddingLeft: 18, position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 0, color: '#888', fontSize: 12 }}>{numbered[1]}.</span>
+              <InlineMarkdown text={numbered[2]} />
+            </p>
+          )
+        }
+
+        // Empty line → small gap
+        if (!line.trim()) return <div key={li} style={{ height: 6 }} />
+
+        // Regular paragraph
+        return <p key={li} style={{ margin: '2px 0' }}><InlineMarkdown text={line} /></p>
+      })}
+    </>
+  )
+}
+
+/** Handles inline **bold**, *italic*, and `code` within a single line */
+function InlineMarkdown({ text }: { text: string }) {
+  // Split on **bold**, *italic*, `code` tokens
+  const tokens = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g)
+
+  return (
+    <>
+      {tokens.map((tok, i) => {
+        if (tok.startsWith('**') && tok.endsWith('**')) {
+          return <strong key={i} style={{ color: '#fff', fontWeight: 600 }}>{tok.slice(2, -2)}</strong>
+        }
+        if (tok.startsWith('*') && tok.endsWith('*')) {
+          return <em key={i} style={{ color: '#ccc' }}>{tok.slice(1, -1)}</em>
+        }
+        if (tok.startsWith('`') && tok.endsWith('`')) {
+          return (
+            <code key={i} style={{ background: '#1e1e1e', color: '#C8FF00', padding: '1px 5px', borderRadius: 4, fontSize: 12, fontFamily: 'monospace' }}>
+              {tok.slice(1, -1)}
+            </code>
+          )
+        }
+        return <span key={i}>{tok}</span>
+      })}
     </>
   )
 }
