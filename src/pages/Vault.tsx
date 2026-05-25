@@ -1064,9 +1064,10 @@ const finp: React.CSSProperties = { background: '#0f0f0f', border: '1px solid #2
 
 /* ── Tab content components ── */
 
-function AudioTab({ files, playingFile, onPlay, onDelete, onRename, onTagsChange, inProjectIds }: {
+function AudioTab({ files, playingFile, miniPlaying, onPlay, onDelete, onRename, onTagsChange, inProjectIds }: {
   files: VaultFile[]
   playingFile: VaultFile | null
+  miniPlaying?: boolean
   onPlay: (f: VaultFile) => void
   onDelete: (f: VaultFile) => void
   onRename: (f: VaultFile, title: string) => void
@@ -1163,9 +1164,10 @@ function VisualsTab({ files, onDelete, onTagsChange, onOpenLightbox }: {
   )
 }
 
-function IdeasTab({ files, playingFile, onPlay, onDelete, onRename, onTagsChange, onEditNote }: {
+function IdeasTab({ files, playingFile, miniPlaying, onPlay, onDelete, onRename, onTagsChange, onEditNote }: {
   files: VaultFile[]
   playingFile: VaultFile | null
+  miniPlaying?: boolean
   onPlay: (f: VaultFile) => void
   onDelete: (f: VaultFile) => void
   onRename: (f: VaultFile, title: string) => void
