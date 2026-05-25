@@ -1089,7 +1089,7 @@ function AudioTab({ files, playingFile, miniPlaying, onPlay, onDelete, onRename,
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {files.map(f => (
         <AudioRow key={f.id} file={f}
-          isPlaying={playingFile?.id === f.id}
+          isPlaying={playingFile?.id === f.id && !!miniPlaying}
           onPlay={() => onPlay(f)}
           onDelete={() => onDelete(f)}
           onRename={title => onRename(f, title)}
@@ -1191,7 +1191,7 @@ function IdeasTab({ files, playingFile, miniPlaying, onPlay, onDelete, onRename,
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
       {files.map(f => (
         <IdeaCard key={f.id} file={f}
-          isPlaying={playingFile?.id === f.id}
+          isPlaying={playingFile?.id === f.id && !!miniPlaying}
           onPlay={() => onPlay(f)}
           onDelete={() => onDelete(f)}
           onRename={title => onRename(f, title)}
