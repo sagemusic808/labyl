@@ -69,6 +69,8 @@ export function RolloutView() {
   const [editedArtworkPreview, setEditedArtworkPreview] = useState<string | null>(null)
   const [editedPlan, setEditedPlan] = useState<RolloutPlan | null>(null)
 
+  const [linkedRelease, setLinkedRelease] = useState<{ id: string; status: string; artwork_url: string | null } | null>(null)
+
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState('')
   const [chatPrompt, setChatPrompt] = useState('')
@@ -86,6 +88,12 @@ export function RolloutView() {
       setLoading(false)
     })
   }, [user, id])
+
+  useEffect(() => {
+    if (!rollout?.release_id) return
+    supabase.from('releases').select('id,status,artwork_url').eq('id', rollout.release_id).single()
+      .then(({ data }) => { if (data) setLinkedRelease(data as typeof linkedRelease) })
+  }, [rollout?.release_id])
 
   useEffect(() => {
     if (!toast) return
@@ -227,6 +235,9 @@ export function RolloutView() {
   const displayDropDate = isEditing ? editedDropDate : rollout?.drop_date
   const displayGoals = isEditing ? editedGoals : (rollout?.goals ?? [])
 
+  const todayDate = new Date().toISOString().split('T')[0]
+  const isLive = !!rollout.drop_date && rollout.drop_date <= todayDate
+
   const formattedDate = displayDropDate
     ? new Date(displayDropDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : null
@@ -269,6 +280,27 @@ export function RolloutView() {
       </header>
 
       <div style={styles.content}>
+        {isLive && (
+          <div style={{ maxWidth: 680, margin: '0 auto 24px', background: 'rgba(29,158,117,0.1)', border: '0.5px solid rgba(29,158,117,0.3)', borderRadius: 14, padding: '20px 24px', display: 'flex', alignItems: 'center', gap: 16 }}>
+            {(linkedRelease?.artwork_url ?? rollout.artwork_url) && (
+              <img src={linkedRelease?.artwork_url ?? rollout.artwork_url ?? ''} alt="" style={{ width: 64, height: 64, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#1D9E75', letterSpacing: '0.5px' }}>● THIS RELEASE IS LIVE</span>
+              </div>
+              <p style={{ fontSize: 15, fontWeight: 700, color: '#fff', marginBottom: 2 }}>{rollout.release_title}</p>
+              <p style={{ fontSize: 12, color: '#555' }}>Dropped {new Date(rollout.drop_date! + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+            </div>
+            {linkedRelease && (
+              <button
+                onClick={() => navigate(`/app/releases/${linkedRelease.id}`)}
+                style={{ background: '#1D9E75', border: 'none', color: '#fff', borderRadius: 8, padding: '9px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                View in Catalog →
+              </button>
+            )}
+          </div>
+        )}
         <div style={styles.planContainer}>
           {/* Plan header */}
           <div style={styles.planHeader}>

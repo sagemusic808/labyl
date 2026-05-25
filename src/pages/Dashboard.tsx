@@ -18,6 +18,13 @@ interface Rollout {
   created_at: string
 }
 
+function todayStr() {
+  return new Date().toISOString().split('T')[0]
+}
+function daysAgoStr(n: number) {
+  return new Date(Date.now() - n * 86400000).toISOString().split('T')[0]
+}
+
 export function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -33,11 +40,39 @@ export function Dashboard() {
       supabase.from('labels').select('*').eq('user_id', user.id).single(),
       supabase.from('rollouts').select('id,release_title,release_type,drop_date,artwork_url,release_id,releases(artwork_url),created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
     ]).then(([labelRes, rolloutsRes]) => {
+      const loadedRollouts = (rolloutsRes.data as Rollout[]) ?? []
       setLabel(labelRes.data)
-      setRollouts((rolloutsRes.data as Rollout[]) ?? [])
+      setRollouts(loadedRollouts)
       setLoading(false)
+      if (user) autoReleaseCheck(loadedRollouts, user.id)
     })
   }, [user])
+
+  async function autoReleaseCheck(rolloutList: Rollout[], userId: string) {
+    const today = todayStr()
+    for (const r of rolloutList) {
+      if (!r.drop_date || r.drop_date > today) continue
+      if (r.release_id) {
+        // Update existing linked release to out_now
+        await supabase.from('releases').update({ status: 'out_now' }).eq('id', r.release_id)
+      } else {
+        // Create a release automatically
+        const { data: newRelease } = await supabase.from('releases').insert({
+          user_id: userId,
+          title: r.release_title,
+          type: r.release_type ?? 'Single',
+          drop_date: r.drop_date,
+          artwork_url: r.artwork_url ?? null,
+          status: 'out_now',
+        }).select('id').single()
+        if (newRelease) {
+          await supabase.from('rollouts').update({ release_id: newRelease.id }).eq('id', r.id)
+          // Update local state so the row gets the release_id
+          setRollouts(rs => rs.map(x => x.id === r.id ? { ...x, release_id: newRelease.id } : x))
+        }
+      }
+    }
+  }
 
   async function confirmDelete() {
     if (!deleteTarget) return
@@ -59,8 +94,20 @@ export function Dashboard() {
     )
   }
 
+  const today = todayStr()
+  const sevenDaysAgo = daysAgoStr(7)
+  const activeRollouts = rollouts.filter(r => !r.drop_date || r.drop_date >= sevenDaysAgo)
+  const pastRollouts   = rollouts.filter(r => !!r.drop_date && r.drop_date < sevenDaysAgo)
+
   return (
     <div style={styles.root}>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes livePulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(200,255,0,0.6); }
+          50% { box-shadow: 0 0 12px 4px rgba(200,255,0,0.3); }
+        }
+      `}</style>
       {/* ── Top nav ── */}
       <header style={styles.nav}>
         <div style={styles.navLeft}>
@@ -105,7 +152,7 @@ export function Dashboard() {
           {[
             { label: 'Monthly Streams', value: '—' },
             { label: 'Total Earnings', value: '—' },
-            { label: 'Active Releases', value: String(rollouts.length) },
+            { label: 'Active Releases', value: String(activeRollouts.length) },
           ].map(stat => (
             <div key={stat.label} style={styles.statCard}>
               <p style={styles.statValue}>{stat.value}</p>
@@ -135,11 +182,11 @@ export function Dashboard() {
         <section style={styles.section}>
           <div style={styles.sectionHeader}>
             <h2 style={styles.sectionTitle}>Active Rollouts</h2>
-            {rollouts.length > 0 && (
+            {activeRollouts.length > 0 && (
               <button onClick={() => navigate('/app/rollout/new')} style={styles.newRolloutLink}>+ New</button>
             )}
           </div>
-          {rollouts.length === 0 ? (
+          {activeRollouts.length === 0 ? (
             <div style={styles.emptyCard}>
               <RolloutsIcon />
               <p style={styles.emptyTitle}>No active rollouts</p>
@@ -150,16 +197,35 @@ export function Dashboard() {
             </div>
           ) : (
             <div style={styles.rolloutList}>
-              {rollouts.map(r => (
+              {activeRollouts.map(r => (
                 <RolloutRow
                   key={r.id}
                   rollout={r}
+                  isLiveToday={!!r.drop_date && r.drop_date === today}
                   onDelete={() => setDeleteTarget(r)}
                 />
               ))}
             </div>
           )}
         </section>
+
+        {pastRollouts.length > 0 && (
+          <section style={styles.section}>
+            <div style={styles.sectionHeader}>
+              <h2 style={{ ...styles.sectionTitle, color: '#444' }}>Past Rollouts</h2>
+            </div>
+            <div style={styles.rolloutList}>
+              {pastRollouts.map(r => (
+                <RolloutRow
+                  key={r.id}
+                  rollout={r}
+                  isLiveToday={false}
+                  onDelete={() => setDeleteTarget(r)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* SECTION 4 — Quick Actions */}
         <section style={styles.section}>
@@ -255,7 +321,7 @@ function AgentCard({ agent, onClick }: { agent: Agent; onClick: () => void }) {
   )
 }
 
-function RolloutRow({ rollout, onDelete }: { rollout: Rollout; onDelete: () => void }) {
+function RolloutRow({ rollout, isLiveToday, onDelete }: { rollout: Rollout; isLiveToday: boolean; onDelete: () => void }) {
   const navigate = useNavigate()
   const [hovered, setHovered] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -302,7 +368,19 @@ function RolloutRow({ rollout, onDelete }: { rollout: Rollout; onDelete: () => v
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={styles.activePill}>● Active</span>
+        {isLiveToday ? (
+          <span style={{
+            fontSize: 11, fontWeight: 700, color: '#000',
+            background: '#C8FF00',
+            borderRadius: 5, padding: '3px 10px',
+            letterSpacing: '0.3px',
+            animation: 'livePulse 2s ease-in-out infinite',
+          }}>
+            Live Today 🎤
+          </span>
+        ) : (
+          <span style={styles.activePill}>● Active</span>
+        )}
 
         {/* Three-dot menu */}
         <div

@@ -1284,6 +1284,39 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
   // ── Sync isPlaying to parent (for track row buttons) ──
   useEffect(() => { onPlayStateChange(isPlaying) }, [isPlaying]) // eslint-disable-line
 
+  // ── Media Session API (lock screen / AirPods controls) ──
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || activeIdx === null) return
+    const track = tracks[activeIdx]
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: formatTrackTitle(track.title, track.features ?? []),
+      artist: '',
+      album: '',
+      artwork: coverArtUrl ? [{ src: coverArtUrl, sizes: '512x512', type: 'image/jpeg' }] : [],
+    })
+    navigator.mediaSession.setActionHandler('play', () => { if (!playingRef.current) togglePlay() })
+    navigator.mediaSession.setActionHandler('pause', () => { if (playingRef.current) togglePlay() })
+    navigator.mediaSession.setActionHandler('nexttrack', () => {
+      const i = activeIdxRef.current
+      if (i !== null && i < tracks.length - 1) onSetIdx(i + 1)
+    })
+    navigator.mediaSession.setActionHandler('previoustrack', () => {
+      const i = activeIdxRef.current
+      if (i !== null && i > 0) onSetIdx(i - 1)
+      else seekTo(0)
+    })
+    navigator.mediaSession.setActionHandler('seekbackward', ({ seekOffset }) => seekTo((acRef.current ? acRef.current.currentTime - startAcRef.current : 0) - (seekOffset ?? 15)))
+    navigator.mediaSession.setActionHandler('seekforward', ({ seekOffset }) => seekTo((acRef.current ? acRef.current.currentTime - startAcRef.current : 0) + (seekOffset ?? 15)))
+  }, [activeIdx, tracks, coverArtUrl]) // eslint-disable-line
+
+  // ── Update Media Session position state (for lock screen scrubber) ──
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    try {
+      navigator.mediaSession.setPositionState({ duration: duration || 0, position: Math.min(currentTime, duration || 0), playbackRate: 1 })
+    } catch { /* not supported on all browsers */ }
+  }, [currentTime, duration])
+
   // ── Controls ──
   function togglePlay() {
     const ac = acRef.current
@@ -1292,11 +1325,19 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
       ac.suspend()
       playingRef.current = false
       setIsPlaying(false)
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
     } else {
       ac.resume()
       playingRef.current = true
       setIsPlaying(true)
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
     }
+  }
+
+  function seekTo(offset: number) {
+    if (activeIdxRef.current === null) return
+    const clamped = Math.max(0, Math.min(offset, durRef.current))
+    playAt(getActiveAudioUrl(tracks[activeIdxRef.current]), clamped)
   }
 
   // Expose toggle + warmup to parent via ref.

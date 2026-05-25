@@ -152,7 +152,7 @@ function SimpleTagInput({ tags, onChange }: { tags: string[]; onChange: (t: stri
 
 /* ── VaultMiniPlayer ── */
 
-function VaultMiniPlayer({ file, onClose }: { file: VaultFile; onClose: () => void }) {
+function VaultMiniPlayer({ file, onClose, onNext, onPrev }: { file: VaultFile; onClose: () => void; onNext?: () => void; onPrev?: () => void }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
@@ -169,11 +169,40 @@ function VaultMiniPlayer({ file, onClose }: { file: VaultFile; onClose: () => vo
     return () => { a.pause(); audioRef.current = null }
   }, [file]) // eslint-disable-line
 
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: file.title,
+      artist: '',
+      album: 'Vault',
+      artwork: [],
+    })
+    navigator.mediaSession.setActionHandler('play', () => { if (!playing) { audioRef.current?.play(); setPlaying(true) } })
+    navigator.mediaSession.setActionHandler('pause', () => { audioRef.current?.pause(); setPlaying(false) })
+    navigator.mediaSession.setActionHandler('seekbackward', ({ seekOffset }) => skip(-(seekOffset ?? 15)))
+    navigator.mediaSession.setActionHandler('seekforward', ({ seekOffset }) => skip(seekOffset ?? 15))
+    navigator.mediaSession.setActionHandler('nexttrack', onNext ?? null as unknown as () => void)
+    navigator.mediaSession.setActionHandler('previoustrack', onPrev ?? null as unknown as () => void)
+    return () => {
+      try {
+        navigator.mediaSession.setActionHandler('nexttrack', null as unknown as () => void)
+        navigator.mediaSession.setActionHandler('previoustrack', null as unknown as () => void)
+      } catch { /* ignore */ }
+    }
+  }, [file, onNext, onPrev]) // eslint-disable-line
+
   function togglePlay() {
     const a = audioRef.current
     if (!a) return
-    if (playing) { a.pause(); setPlaying(false) }
-    else { a.play(); setPlaying(true) }
+    if (playing) {
+      a.pause()
+      setPlaying(false)
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
+    } else {
+      a.play()
+      setPlaying(true)
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
+    }
   }
 
   function seek(e: ChangeEvent<HTMLInputElement>) {
@@ -1433,7 +1462,18 @@ export function Vault() {
       </main>
 
       {/* Mini player */}
-      {playingFile && <VaultMiniPlayer file={playingFile} onClose={() => setPlayingFile(null)} />}
+      {playingFile && (() => {
+        const audioQueue = audioFiles  // already filtered+sorted
+        const qi = audioQueue.findIndex(f => f.id === playingFile.id)
+        return (
+          <VaultMiniPlayer
+            file={playingFile}
+            onClose={() => setPlayingFile(null)}
+            onNext={qi >= 0 && qi < audioQueue.length - 1 ? () => setPlayingFile(audioQueue[qi + 1]) : undefined}
+            onPrev={qi > 0 ? () => setPlayingFile(audioQueue[qi - 1]) : undefined}
+          />
+        )
+      })()}
 
       {/* Modals */}
       {showUpload && (
