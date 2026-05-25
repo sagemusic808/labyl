@@ -446,6 +446,7 @@ export function Releases() {
           <nav style={{ display: 'flex', gap: 2 }}>
             <button onClick={() => navigate('/app/dashboard')} style={{ background: 'transparent', border: 'none', color: '#555', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '5px 10px', borderRadius: 6 }}>HQ</button>
             <button onClick={() => navigate('/app/projects')} style={{ background: 'transparent', border: 'none', color: '#555', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '5px 10px', borderRadius: 6 }}>Projects</button>
+            <button onClick={() => navigate('/app/vault')} style={{ background: 'transparent', border: 'none', color: '#555', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '5px 10px', borderRadius: 6 }}>Vault</button>
             <button style={{ background: 'rgba(200,255,0,0.08)', border: 'none', color: '#C8FF00', fontSize: 13, fontWeight: 600, cursor: 'default', padding: '5px 10px', borderRadius: 6 }}>Catalog</button>
           </nav>
         </div>

@@ -598,6 +598,9 @@ function AddTrackModal({ projectId, userId, onClose, onAdded }: {
 }) {
   const audioInputRef = useRef<HTMLInputElement>(null)
 
+  const [addTab, setAddTab] = useState<'upload' | 'vault'>('upload')
+
+  // Upload tab state
   const [title, setTitle]           = useState('')
   const [audioFile, setAudioFile]   = useState<File | null>(null)
   const [versionName, setVersionName] = useState('Original')
@@ -606,6 +609,27 @@ function AddTrackModal({ projectId, userId, onClose, onAdded }: {
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
   const [status, setStatus]         = useState('')
+
+  // Vault tab state
+  const [vaultFiles, setVaultFiles] = useState<{ id: string; title: string; file_url: string | null; duration_seconds: number | null; tags: string[] }[]>([])
+  const [vaultSearch, setVaultSearch] = useState('')
+  const [selectedVaultFile, setSelectedVaultFile] = useState<{ id: string; title: string; file_url: string | null; duration_seconds: number | null } | null>(null)
+  const [vaultTrackTitle, setVaultTrackTitle] = useState('')
+  const [vaultLoaded, setVaultLoaded] = useState(false)
+
+  useEffect(() => {
+    if (addTab !== 'vault' || vaultLoaded) return
+    supabase
+      .from('vault_files')
+      .select('id, title, file_url, duration_seconds, tags')
+      .eq('user_id', userId)
+      .eq('file_type', 'audio')
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        setVaultFiles((data ?? []) as { id: string; title: string; file_url: string | null; duration_seconds: number | null; tags: string[] }[])
+        setVaultLoaded(true)
+      })
+  }, [addTab, vaultLoaded, userId])
 
   async function handleAdd() {
     if (!title.trim() || !audioFile) return
@@ -668,62 +692,193 @@ function AddTrackModal({ projectId, userId, onClose, onAdded }: {
     })
   }
 
+  async function handleAddFromVault() {
+    if (!selectedVaultFile) return
+    setSaving(true)
+    setError('')
+
+    const { count } = await supabase.from('project_tracks').select('*', { count: 'exact', head: true }).eq('project_id', projectId)
+    const position = count ?? 0
+    const trackTitle = vaultTrackTitle.trim() || selectedVaultFile.title
+
+    const { data: trackData, error: trackErr } = await supabase.from('project_tracks').insert({
+      project_id: projectId,
+      user_id: userId,
+      title: trackTitle,
+      audio_url: selectedVaultFile.file_url ?? '',
+      features: [],
+      notes: null,
+      position,
+      duration_seconds: selectedVaultFile.duration_seconds,
+      vault_file_id: selectedVaultFile.id,
+    } as Record<string, unknown>).select().single()
+
+    if (trackErr || !trackData) { setError(trackErr?.message ?? 'Error'); setSaving(false); return }
+
+    const { data: vData } = await supabase.from('track_versions').insert({
+      track_id: (trackData as { id: string }).id,
+      user_id: userId,
+      version_name: 'Original',
+      audio_url: selectedVaultFile.file_url ?? '',
+      is_active: true,
+    }).select().single()
+    const version = vData as TrackVersion | null
+
+    await supabase.from('project_tracks').update({ active_version_id: version?.id ?? null }).eq('id', (trackData as { id: string }).id)
+    await supabase.from('projects').update({ updated_at: new Date().toISOString() }).eq('id', projectId)
+
+    setSaving(false)
+    onAdded({
+      ...(trackData as ProjectTrack),
+      features: [],
+      active_version_id: version?.id ?? null,
+      track_versions: version ? [version] : [],
+    })
+  }
+
+  const filteredVaultFiles = vaultFiles.filter(f =>
+    !vaultSearch ||
+    f.title.toLowerCase().includes(vaultSearch.toLowerCase()) ||
+    f.tags.some(t => t.toLowerCase().includes(vaultSearch.toLowerCase()))
+  )
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.88)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px' }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{ background: '#111', border: '0.5px solid #222', borderRadius: 16, padding: 28, width: '100%', maxWidth: 480, maxHeight: '92vh', overflowY: 'auto' }}>
-        <h2 style={{ fontSize: 17, fontWeight: 700, color: '#fff', marginBottom: 24, letterSpacing: '-0.3px' }}>Add Track</h2>
+        <h2 style={{ fontSize: 17, fontWeight: 700, color: '#fff', marginBottom: 16, letterSpacing: '-0.3px' }}>Add Track</h2>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          {/* Title */}
-          <div>
-            <label style={lbl}>TRACK TITLE *</label>
-            <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Untitled" autoFocus
-              style={inp} onFocus={e => (e.target.style.borderColor = '#C8FF00')} onBlur={e => (e.target.style.borderColor = '#222')} />
-          </div>
+        {/* Tab switcher */}
+        <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '0.5px solid #1a1a1a' }}>
+          {(['upload', 'vault'] as const).map(t => (
+            <button key={t} onClick={() => setAddTab(t)} style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: addTab === t ? '#fff' : '#555',
+              fontSize: 13, fontWeight: addTab === t ? 600 : 500,
+              padding: '6px 16px',
+              borderBottom: `2px solid ${addTab === t ? '#C8FF00' : 'transparent'}`,
+              transition: 'color 0.15s',
+            }}>
+              {t === 'upload' ? 'Upload new' : 'From Vault'}
+            </button>
+          ))}
+        </div>
 
-          {/* Audio */}
-          <div>
-            <label style={lbl}>AUDIO FILE * <span style={{ color: '#444', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>.mp3 .wav</span></label>
-            <div onClick={() => audioInputRef.current?.click()}
-              style={{ background: '#0f0f0f', border: `1px solid ${audioFile ? '#C8FF00' : '#222'}`, borderRadius: 8, padding: '11px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, transition: 'border-color 0.15s' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={audioFile ? '#C8FF00' : '#444'} strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
-              <span style={{ fontSize: 13, color: audioFile ? '#C8FF00' : '#444' }}>{audioFile ? audioFile.name : 'Choose audio file'}</span>
+        {/* Upload tab */}
+        {addTab === 'upload' && (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              {/* Title */}
+              <div>
+                <label style={lbl}>TRACK TITLE *</label>
+                <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Untitled" autoFocus
+                  style={inp} onFocus={e => (e.target.style.borderColor = '#C8FF00')} onBlur={e => (e.target.style.borderColor = '#222')} />
+              </div>
+
+              {/* Audio */}
+              <div>
+                <label style={lbl}>AUDIO FILE * <span style={{ color: '#444', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>.mp3 .wav</span></label>
+                <div onClick={() => audioInputRef.current?.click()}
+                  style={{ background: '#0f0f0f', border: `1px solid ${audioFile ? '#C8FF00' : '#222'}`, borderRadius: 8, padding: '11px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, transition: 'border-color 0.15s' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={audioFile ? '#C8FF00' : '#444'} strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+                  <span style={{ fontSize: 13, color: audioFile ? '#C8FF00' : '#444' }}>{audioFile ? audioFile.name : 'Choose audio file'}</span>
+                </div>
+                <input ref={audioInputRef} type="file" accept=".mp3,.wav,audio/*" onChange={e => setAudioFile(e.target.files?.[0] ?? null)} style={{ display: 'none' }} />
+              </div>
+
+              {/* Version name */}
+              <div>
+                <label style={lbl}>VERSION NAME</label>
+                <input value={versionName} onChange={e => setVersionName(e.target.value)} placeholder="e.g. Demo, Mixed, Mastered"
+                  style={inp} onFocus={e => (e.target.style.borderColor = '#C8FF00')} onBlur={e => (e.target.style.borderColor = '#222')} />
+              </div>
+
+              {/* Features */}
+              <div>
+                <label style={lbl}>FEATURES <span style={{ color: '#444', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>optional · press enter or comma to add</span></label>
+                <TagInput tags={features} onChange={setFeatures} />
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label style={lbl}>NOTES <span style={{ color: '#444', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>optional</span></label>
+                <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Production notes, lyric ideas, anything relevant" rows={3}
+                  style={{ ...inp, resize: 'vertical', lineHeight: 1.55 }}
+                  onFocus={e => (e.target.style.borderColor = '#C8FF00')} onBlur={e => (e.target.style.borderColor = '#222')} />
+              </div>
             </div>
-            <input ref={audioInputRef} type="file" accept=".mp3,.wav,audio/*" onChange={e => setAudioFile(e.target.files?.[0] ?? null)} style={{ display: 'none' }} />
-          </div>
 
-          {/* Version name */}
-          <div>
-            <label style={lbl}>VERSION NAME</label>
-            <input value={versionName} onChange={e => setVersionName(e.target.value)} placeholder="e.g. Demo, Mixed, Mastered"
-              style={inp} onFocus={e => (e.target.style.borderColor = '#C8FF00')} onBlur={e => (e.target.style.borderColor = '#222')} />
-          </div>
+            {status && <p style={{ fontSize: 12, color: '#888', marginTop: 12 }}>{status}</p>}
+            {error && <p style={{ fontSize: 12, color: '#FF4444', marginTop: 6 }}>{error}</p>}
 
-          {/* Features */}
-          <div>
-            <label style={lbl}>FEATURES <span style={{ color: '#444', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>optional · press enter or comma to add</span></label>
-            <TagInput tags={features} onChange={setFeatures} />
-          </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #2a2a2a', color: '#888', borderRadius: 8, padding: '10px 18px', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={handleAdd} disabled={!title.trim() || !audioFile || saving}
+                style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: !title.trim() || !audioFile || saving ? 'not-allowed' : 'pointer', opacity: !title.trim() || !audioFile || saving ? 0.5 : 1, transition: 'opacity 0.15s' }}>
+                {saving ? (status || 'Working…') : 'Add to Project'}
+              </button>
+            </div>
+          </>
+        )}
 
-          {/* Notes */}
-          <div>
-            <label style={lbl}>NOTES <span style={{ color: '#444', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>optional</span></label>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Production notes, lyric ideas, anything relevant" rows={3}
-              style={{ ...inp, resize: 'vertical', lineHeight: 1.55 }}
-              onFocus={e => (e.target.style.borderColor = '#C8FF00')} onBlur={e => (e.target.style.borderColor = '#222')} />
-          </div>
-        </div>
+        {/* Vault tab */}
+        {addTab === 'vault' && (
+          <>
+            {/* Search */}
+            <div style={{ marginBottom: 12 }}>
+              <input value={vaultSearch} onChange={e => setVaultSearch(e.target.value)} placeholder="Search vault audio…"
+                style={inp} onFocus={e => (e.target.style.borderColor = '#C8FF00')} onBlur={e => (e.target.style.borderColor = '#222')} />
+            </div>
 
-        {status && <p style={{ fontSize: 12, color: '#888', marginTop: 12 }}>{status}</p>}
-        {error && <p style={{ fontSize: 12, color: '#FF4444', marginTop: 6 }}>{error}</p>}
+            {/* Vault file list */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflowY: 'auto', marginBottom: 16 }}>
+              {!vaultLoaded ? (
+                <p style={{ fontSize: 13, color: '#555', textAlign: 'center', padding: '20px 0' }}>Loading…</p>
+              ) : filteredVaultFiles.length === 0 ? (
+                <p style={{ fontSize: 13, color: '#555', textAlign: 'center', padding: '20px 0' }}>
+                  {vaultFiles.length === 0 ? 'No audio in Vault yet. Upload files in the Vault page.' : 'No results.'}
+                </p>
+              ) : filteredVaultFiles.map(f => {
+                const isSelected = selectedVaultFile?.id === f.id
+                return (
+                  <div key={f.id} onClick={() => { setSelectedVaultFile(f); setVaultTrackTitle(f.title) }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: isSelected ? 'rgba(200,255,0,0.04)' : '#0d0d0d', border: `0.5px solid ${isSelected ? 'rgba(200,255,0,0.3)' : '#1a1a1a'}`, borderRadius: 8, cursor: 'pointer', transition: 'all 0.1s' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#C8FF00' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.title}</p>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
+                        {f.duration_seconds ? <span style={{ fontSize: 11, color: '#555' }}>{Math.floor(f.duration_seconds / 60)}:{(f.duration_seconds % 60).toString().padStart(2, '0')}</span> : null}
+                        {f.tags.slice(0, 3).map(tag => (
+                          <span key={tag} style={{ background: '#1a1a1a', color: '#555', fontSize: 10, borderRadius: 3, padding: '1px 6px' }}>{tag}</span>
+                        ))}
+                      </div>
+                    </div>
+                    {isSelected && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="#C8FF00"><polyline points="20 6 9 17 4 12" /></svg>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
 
-        <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #2a2a2a', color: '#888', borderRadius: 8, padding: '10px 18px', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-          <button onClick={handleAdd} disabled={!title.trim() || !audioFile || saving}
-            style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: !title.trim() || !audioFile || saving ? 'not-allowed' : 'pointer', opacity: !title.trim() || !audioFile || saving ? 0.5 : 1, transition: 'opacity 0.15s' }}>
-            {saving ? (status || 'Working…') : 'Add to Project'}
-          </button>
-        </div>
+            {/* Track title input */}
+            {selectedVaultFile && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={lbl}>TRACK TITLE</label>
+                <input value={vaultTrackTitle} onChange={e => setVaultTrackTitle(e.target.value)} placeholder={selectedVaultFile.title}
+                  style={inp} onFocus={e => (e.target.style.borderColor = '#C8FF00')} onBlur={e => (e.target.style.borderColor = '#222')} />
+              </div>
+            )}
+
+            {error && <p style={{ fontSize: 12, color: '#FF4444', marginBottom: 8 }}>{error}</p>}
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #2a2a2a', color: '#888', borderRadius: 8, padding: '10px 18px', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={handleAddFromVault} disabled={!selectedVaultFile || saving}
+                style={{ background: '#C8FF00', border: 'none', color: '#000', borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: !selectedVaultFile || saving ? 'not-allowed' : 'pointer', opacity: !selectedVaultFile || saving ? 0.5 : 1, transition: 'opacity 0.15s' }}>
+                {saving ? 'Adding…' : 'Add to Project'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

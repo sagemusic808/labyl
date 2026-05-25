@@ -7,6 +7,7 @@ import { Onboarding } from './pages/Onboarding'
 import { Dashboard } from './pages/Dashboard'
 import { Projects } from './pages/Projects'
 import { ProjectDetail } from './pages/ProjectDetail'
+import { Vault } from './pages/Vault'
 import { Releases } from './pages/Releases'
 import { ReleaseDetail } from './pages/ReleaseDetail'
 import { RolloutNew } from './pages/RolloutNew'
@@ -54,6 +55,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ProjectDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/vault"
+            element={
+              <ProtectedRoute>
+                <Vault />
               </ProtectedRoute>
             }
           />
