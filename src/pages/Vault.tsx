@@ -190,8 +190,6 @@ function VaultMiniPlayer({ file, onClose }: { file: VaultFile; onClose: () => vo
     a.currentTime = Math.max(0, Math.min(a.duration, a.currentTime + delta))
   }
 
-  const pct = duration > 0 ? current / duration : 0
-
   return (
     <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 72, background: 'rgba(10,10,10,0.95)', borderTop: '0.5px solid #222', backdropFilter: 'blur(20px)', zIndex: 100, display: 'flex', alignItems: 'center', padding: '0 24px', gap: 16 }}>
       {/* Title */}
