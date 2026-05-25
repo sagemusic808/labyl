@@ -25,7 +25,7 @@
   -- Go to Storage → New bucket, name: "vault", public: true
 */
 
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -152,7 +152,10 @@ function SimpleTagInput({ tags, onChange }: { tags: string[]; onChange: (t: stri
 
 /* ── VaultMiniPlayer ── */
 
-function VaultMiniPlayer({ file, onClose, onNext, onPrev }: { file: VaultFile; onClose: () => void; onNext?: () => void; onPrev?: () => void }) {
+interface MiniPlayerHandle { toggle: () => void }
+
+const VaultMiniPlayer = forwardRef<MiniPlayerHandle, { file: VaultFile; onClose: () => void; onNext?: () => void; onPrev?: () => void; onPlayStateChange?: (playing: boolean) => void }>(
+function VaultMiniPlayer({ file, onClose, onNext, onPrev, onPlayStateChange }, ref) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
@@ -191,16 +194,20 @@ function VaultMiniPlayer({ file, onClose, onNext, onPrev }: { file: VaultFile; o
     }
   }, [file, onNext, onPrev]) // eslint-disable-line
 
+  useImperativeHandle(ref, () => ({ toggle: togglePlay })) // eslint-disable-line
+
   function togglePlay() {
     const a = audioRef.current
     if (!a) return
     if (playing) {
       a.pause()
       setPlaying(false)
+      onPlayStateChange?.(false)
       if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
     } else {
       a.play()
       setPlaying(true)
+      onPlayStateChange?.(true)
       if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
     }
   }
@@ -261,7 +268,7 @@ function VaultMiniPlayer({ file, onClose, onNext, onPrev }: { file: VaultFile; o
       <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#555', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
     </div>
   )
-}
+})
 
 /* ── AudioRow ── */
 
@@ -1295,9 +1302,11 @@ export function Vault() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
   const [showUpload, setShowUpload] = useState(false)
   const [playingFile, setPlayingFile] = useState<VaultFile | null>(null)
+  const [miniPlaying, setMiniPlaying] = useState(false)
   const [lightboxFile, setLightboxFile] = useState<VaultFile | null>(null)
   const [editingNote, setEditingNote] = useState<VaultFile | null>(null)
   const [inProjectIds, setInProjectIds] = useState<Set<string>>(new Set())
+  const miniPlayerRef = useRef<MiniPlayerHandle>(null)
 
   useEffect(() => {
     if (!user) return
@@ -1433,7 +1442,7 @@ export function Vault() {
             visualFiles={visualFiles}
             ideaFiles={ideaFiles}
             playingFile={playingFile}
-            onPlay={f => setPlayingFile(f)}
+            onPlay={f => { if (playingFile?.id === f.id) miniPlayerRef.current?.toggle(); else { setPlayingFile(f); setMiniPlaying(true) } }}
             onDelete={deleteFile}
             onRename={renameFile}
             onTagsChange={updateTags}
@@ -1444,7 +1453,7 @@ export function Vault() {
         ) : (
           <>
             {activeTab === 'audio' && (
-              <AudioTab files={audioFiles} playingFile={playingFile} onPlay={f => setPlayingFile(f)}
+              <AudioTab files={audioFiles} playingFile={playingFile} miniPlaying={miniPlaying} onPlay={f => { if (playingFile?.id === f.id) miniPlayerRef.current?.toggle(); else { setPlayingFile(f); setMiniPlaying(true) } }}
                 onDelete={deleteFile} onRename={renameFile} onTagsChange={updateTags} inProjectIds={inProjectIds} />
             )}
             {activeTab === 'docs' && (
@@ -1454,7 +1463,7 @@ export function Vault() {
               <VisualsTab files={visualFiles} onDelete={deleteFile} onTagsChange={updateTags} onOpenLightbox={f => setLightboxFile(f)} />
             )}
             {activeTab === 'ideas' && (
-              <IdeasTab files={ideaFiles} playingFile={playingFile} onPlay={f => setPlayingFile(f)}
+              <IdeasTab files={ideaFiles} playingFile={playingFile} miniPlaying={miniPlaying} onPlay={f => { if (playingFile?.id === f.id) miniPlayerRef.current?.toggle(); else { setPlayingFile(f); setMiniPlaying(true) } }}
                 onDelete={deleteFile} onRename={renameFile} onTagsChange={updateTags} onEditNote={f => setEditingNote(f)} />
             )}
           </>
@@ -1463,14 +1472,16 @@ export function Vault() {
 
       {/* Mini player */}
       {playingFile && (() => {
-        const audioQueue = audioFiles  // already filtered+sorted
+        const audioQueue = audioFiles
         const qi = audioQueue.findIndex(f => f.id === playingFile.id)
         return (
           <VaultMiniPlayer
+            ref={miniPlayerRef}
             file={playingFile}
-            onClose={() => setPlayingFile(null)}
-            onNext={qi >= 0 && qi < audioQueue.length - 1 ? () => setPlayingFile(audioQueue[qi + 1]) : undefined}
-            onPrev={qi > 0 ? () => setPlayingFile(audioQueue[qi - 1]) : undefined}
+            onClose={() => { setPlayingFile(null); setMiniPlaying(false) }}
+            onPlayStateChange={setMiniPlaying}
+            onNext={qi >= 0 && qi < audioQueue.length - 1 ? () => { setPlayingFile(audioQueue[qi + 1]); setMiniPlaying(true) } : undefined}
+            onPrev={qi > 0 ? () => { setPlayingFile(audioQueue[qi - 1]); setMiniPlaying(true) } : undefined}
           />
         )
       })()}
