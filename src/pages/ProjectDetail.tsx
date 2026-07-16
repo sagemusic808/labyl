@@ -1089,12 +1089,13 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
   accent: string
 }>(function AudioPlayer({ tracks, activeIdx, onSetIdx, coverArtUrl, onPlayStateChange, accent }, ref) {
   // Web Audio API refs
-  const acRef       = useRef<AudioContext | null>(null)
-  const gainRef     = useRef<GainNode | null>(null)
-  const srcRef      = useRef<AudioBufferSourceNode | null>(null)   // currently playing node
-  const schedSrcRef = useRef<AudioBufferSourceNode | null>(null)   // pre-scheduled next node
-  const bufCache    = useRef(new Map<string, AudioBuffer>())
-  const rafRef      = useRef(0)
+  const acRef         = useRef<AudioContext | null>(null)
+  const gainRef       = useRef<GainNode | null>(null)
+  const srcRef        = useRef<AudioBufferSourceNode | null>(null)   // currently playing node
+  const schedSrcRef   = useRef<AudioBufferSourceNode | null>(null)   // pre-scheduled next node
+  const bufCache      = useRef(new Map<string, AudioBuffer>())
+  const rafRef        = useRef(0)
+  const playRequestRef = useRef(0)  // incremented on every playAt; stale loads abort
 
   // Timing refs — updated on every playAt/scheduleNext, read inside RAF
   // Position formula: ac.currentTime - startAcRef  (where startAcRef = acTime - offset)
@@ -1213,8 +1214,18 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, {
     if (ac.state === 'suspended') await ac.resume()
     stopCurrent()
 
+    // Stamp this request; if another playAt fires before loadBuf resolves, bail
+    const myRequest = ++playRequestRef.current
+
     setBuffering(true)
-    const buf = await loadBuf(url)
+    let buf: AudioBuffer
+    try {
+      buf = await loadBuf(url)
+    } catch {
+      if (playRequestRef.current === myRequest) setBuffering(false)
+      return
+    }
+    if (playRequestRef.current !== myRequest) return  // superseded — do nothing
     setBuffering(false)
 
     const src = ac.createBufferSource()

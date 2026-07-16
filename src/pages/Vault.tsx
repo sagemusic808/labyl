@@ -162,17 +162,33 @@ function VaultMiniPlayer({ file, onClose, onNext, onPrev, onPlayStateChange }, r
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(0)
 
+  // Create ONE persistent audio element for the lifetime of the player
   useEffect(() => {
-    if (!file.file_url) return
-    const a = new Audio(file.file_url)
-    audioRef.current = a
+    const a = new Audio()
     a.onloadedmetadata = () => setDuration(a.duration)
-    a.ontimeupdate = () => setCurrent(a.currentTime)
-    a.onended = () => { setPlaying(false); onClose() }
-    a.play().then(() => setPlaying(true)).catch(() => {})
-    return () => { a.pause(); audioRef.current = null }
+    a.ontimeupdate    = () => setCurrent(a.currentTime)
+    a.onended         = () => { setPlaying(false); onPlayStateChange?.(false) }
+    audioRef.current  = a
+    return () => { a.pause(); a.src = ''; audioRef.current = null }
+  }, []) // eslint-disable-line
+
+  // Swap src whenever the file changes — changing src stops the previous track atomically
+  useEffect(() => {
+    const a = audioRef.current
+    if (!a || !file.file_url) return
+    a.pause()
+    a.src         = file.file_url
+    a.currentTime = 0
+    setCurrent(0)
+    setDuration(0)
+    setPlaying(false)
+    onPlayStateChange?.(false)
+    a.play()
+      .then(() => { setPlaying(true); onPlayStateChange?.(true) })
+      .catch(() => {})
   }, [file]) // eslint-disable-line
 
+  // Media Session — update handlers whenever file/callbacks change
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -181,15 +197,19 @@ function VaultMiniPlayer({ file, onClose, onNext, onPrev, onPlayStateChange }, r
       album: 'Vault',
       artwork: [],
     })
-    navigator.mediaSession.setActionHandler('play', () => { if (!playing) { audioRef.current?.play(); setPlaying(true) } })
-    navigator.mediaSession.setActionHandler('pause', () => { audioRef.current?.pause(); setPlaying(false) })
+    navigator.mediaSession.setActionHandler('play', () => {
+      audioRef.current?.play().then(() => { setPlaying(true); onPlayStateChange?.(true) }).catch(() => {})
+    })
+    navigator.mediaSession.setActionHandler('pause', () => {
+      audioRef.current?.pause(); setPlaying(false); onPlayStateChange?.(false)
+    })
     navigator.mediaSession.setActionHandler('seekbackward', ({ seekOffset }) => skip(-(seekOffset ?? 15)))
-    navigator.mediaSession.setActionHandler('seekforward', ({ seekOffset }) => skip(seekOffset ?? 15))
-    navigator.mediaSession.setActionHandler('nexttrack', onNext ?? null as unknown as () => void)
+    navigator.mediaSession.setActionHandler('seekforward',  ({ seekOffset }) => skip(seekOffset ?? 15))
+    navigator.mediaSession.setActionHandler('nexttrack',     onNext ?? null as unknown as () => void)
     navigator.mediaSession.setActionHandler('previoustrack', onPrev ?? null as unknown as () => void)
     return () => {
       try {
-        navigator.mediaSession.setActionHandler('nexttrack', null as unknown as () => void)
+        navigator.mediaSession.setActionHandler('nexttrack',     null as unknown as () => void)
         navigator.mediaSession.setActionHandler('previoustrack', null as unknown as () => void)
       } catch { /* ignore */ }
     }
@@ -206,10 +226,11 @@ function VaultMiniPlayer({ file, onClose, onNext, onPrev, onPlayStateChange }, r
       onPlayStateChange?.(false)
       if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
     } else {
-      a.play()
-      setPlaying(true)
-      onPlayStateChange?.(true)
-      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
+      a.play().then(() => {
+        setPlaying(true)
+        onPlayStateChange?.(true)
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
+      }).catch(() => {})
     }
   }
 
